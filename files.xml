@@ -2,9 +2,7 @@
 	
 	<files id="native-toolkit-vpx">
 		
-		<compilerflag value="-I${NATIVE_TOOLKIT_PATH}/vpx/vp9/common/" />
-		<compilerflag value="-I${NATIVE_TOOLKIT_PATH}/vpx/vp9/decoder/" />
-		<compilerflag value="-I${NATIVE_TOOLKIT_PATH}/vpx/vp9/" />
+		<compilerflag value="-I${NATIVE_TOOLKIT_PATH}/vpx/" />
 		
 		<file name="${NATIVE_TOOLKIT_PATH}/vpx/vp9/common/vp9_alloccommon.c" />
 		<file name="${NATIVE_TOOLKIT_PATH}/vpx/vp9/common/vp9_blockd.c" />
