@@ -170,25 +170,16 @@ void idct8_c(const tran_low_t *input, tran_low_t *output) {
   step1[5] = WRAPLOW(dct_const_round_shift(temp1), 8);
   step1[6] = WRAPLOW(dct_const_round_shift(temp2), 8);
 
-  // stage 2
-  temp1 = (step1[0] + step1[2]) * cospi_16_64;
-  temp2 = (step1[0] - step1[2]) * cospi_16_64;
-  step2[0] = WRAPLOW(dct_const_round_shift(temp1), 8);
-  step2[1] = WRAPLOW(dct_const_round_shift(temp2), 8);
-  temp1 = step1[1] * cospi_24_64 - step1[3] * cospi_8_64;
-  temp2 = step1[1] * cospi_8_64 + step1[3] * cospi_24_64;
-  step2[2] = WRAPLOW(dct_const_round_shift(temp1), 8);
-  step2[3] = WRAPLOW(dct_const_round_shift(temp2), 8);
+  // stage 2 & stage 3 - even half
+  idct4_c(step1, step1);
+
+  // stage 2 - odd half
   step2[4] = WRAPLOW(step1[4] + step1[5], 8);
   step2[5] = WRAPLOW(step1[4] - step1[5], 8);
   step2[6] = WRAPLOW(-step1[6] + step1[7], 8);
   step2[7] = WRAPLOW(step1[6] + step1[7], 8);
 
-  // stage 3
-  step1[0] = WRAPLOW(step2[0] + step2[3], 8);
-  step1[1] = WRAPLOW(step2[1] + step2[2], 8);
-  step1[2] = WRAPLOW(step2[1] - step2[2], 8);
-  step1[3] = WRAPLOW(step2[0] - step2[3], 8);
+  // stage 3 -odd half
   step1[4] = step2[4];
   temp1 = (step2[6] - step2[5]) * cospi_16_64;
   temp2 = (step2[5] + step2[6]) * cospi_16_64;
@@ -1178,33 +1169,6 @@ void vpx_idct32x32_1024_add_c(const tran_low_t *input, uint8_t *dest,
       idct32_c(input, outptr);
     else
       memset(outptr, 0, sizeof(tran_low_t) * 32);
-    input += 32;
-    outptr += 32;
-  }
-
-  // Columns
-  for (i = 0; i < 32; ++i) {
-    for (j = 0; j < 32; ++j)
-      temp_in[j] = out[j * 32 + i];
-    idct32_c(temp_in, temp_out);
-    for (j = 0; j < 32; ++j) {
-      dest[j * stride + i] = clip_pixel_add(dest[j * stride + i],
-                                            ROUND_POWER_OF_TWO(temp_out[j], 6));
-    }
-  }
-}
-
-void vpx_idct32x32_135_add_c(const tran_low_t *input, uint8_t *dest,
-                             int stride) {
-  tran_low_t out[32 * 32] = {0};
-  tran_low_t *outptr = out;
-  int i, j;
-  tran_low_t temp_in[32], temp_out[32];
-
-  // Rows
-  // only upper-left 16x16 has non-zero coeff
-  for (i = 0; i < 16; ++i) {
-    idct32_c(input, outptr);
     input += 32;
     outptr += 32;
   }

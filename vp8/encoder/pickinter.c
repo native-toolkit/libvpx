@@ -21,12 +21,10 @@
 #include "vp8/common/findnearmv.h"
 #include "encodemb.h"
 #include "vp8/common/reconinter.h"
-#include "vp8/common/reconintra.h"
 #include "vp8/common/reconintra4x4.h"
 #include "vpx_dsp/variance.h"
 #include "mcomp.h"
 #include "rdopt.h"
-#include "vpx_dsp/vpx_dsp_common.h"
 #include "vpx_mem/vpx_mem.h"
 #if CONFIG_TEMPORAL_DENOISING
 #include "denoising.h"
@@ -74,7 +72,7 @@ static int macroblock_corner_grad(unsigned char* signal, int stride,
   int y2 = signal[offsetx * stride + offsety + sgny];
   int y3 = signal[(offsetx + sgnx) * stride + offsety];
   int y4 = signal[(offsetx + sgnx) * stride + offsety + sgny];
-  return VPXMAX(VPXMAX(abs(y1 - y2), abs(y1 - y3)), abs(y1 - y4));
+  return MAX(MAX(abs(y1 - y2), abs(y1 - y3)), abs(y1 - y4));
 }
 
 static int check_dot_artifact_candidate(VP8_COMP *cpi,
@@ -815,18 +813,9 @@ void vp8_pick_inter_mode(VP8_COMP *cpi, MACROBLOCK *x, int recon_yoffset,
 
     // Check if current macroblock is in skin area.
     {
-    const int y = (x->src.y_buffer[7 * x->src.y_stride + 7] +
-        x->src.y_buffer[7 * x->src.y_stride + 8] +
-        x->src.y_buffer[8 * x->src.y_stride + 7] +
-        x->src.y_buffer[8 * x->src.y_stride + 8]) >> 2;
-    const int cb = (x->src.u_buffer[3 * x->src.uv_stride + 3] +
-        x->src.u_buffer[3 * x->src.uv_stride + 4] +
-        x->src.u_buffer[4 * x->src.uv_stride + 3] +
-        x->src.u_buffer[4 * x->src.uv_stride + 4]) >> 2;
-    const int cr = (x->src.v_buffer[3 * x->src.uv_stride + 3] +
-        x->src.v_buffer[3 * x->src.uv_stride + 4] +
-        x->src.v_buffer[4 * x->src.uv_stride + 3] +
-        x->src.v_buffer[4 * x->src.uv_stride + 4]) >> 2;
+    const int y = x->src.y_buffer[7 * x->src.y_stride + 7];
+    const int cb = x->src.u_buffer[3 * x->src.uv_stride + 3];
+    const int cr = x->src.v_buffer[3 * x->src.uv_stride + 3];
     x->is_skin = 0;
     if (!cpi->oxcf.screen_content_mode)
       x->is_skin = is_skin_color(y, cb, cr);
@@ -835,7 +824,7 @@ void vp8_pick_inter_mode(VP8_COMP *cpi, MACROBLOCK *x, int recon_yoffset,
     if (cpi->oxcf.noise_sensitivity) {
       // Under aggressive denoising mode, should we use skin map to reduce denoiser
       // and ZEROMV bias? Will need to revisit the accuracy of this detection for
-      // very noisy input. For now keep this as is (i.e., don't turn it off).
+      // very noisy input. For now keep this as is (i.e., don't turn it off). 
       // if (cpi->denoiser.denoiser_mode == kDenoiserOnYUVAggressive)
       //   x->is_skin = 0;
     }
@@ -885,7 +874,7 @@ void vp8_pick_inter_mode(VP8_COMP *cpi, MACROBLOCK *x, int recon_yoffset,
 
     /* If the frame has big static background and current MB is in low
     *  motion area, its mode decision is biased to ZEROMV mode.
-    *  No adjustment if cpu_used is <= -12 (i.e., cpi->Speed >= 12).
+    *  No adjustment if cpu_used is <= -12 (i.e., cpi->Speed >= 12). 
     *  At such speed settings, ZEROMV is already heavily favored.
     */
     if (cpi->Speed < 12) {
@@ -1147,9 +1136,8 @@ void vp8_pick_inter_mode(VP8_COMP *cpi, MACROBLOCK *x, int recon_yoffset,
 #if CONFIG_MULTI_RES_ENCODING
             if (parent_ref_valid && (parent_ref_frame == this_ref_frame) &&
                 dissim <= 2 &&
-                VPXMAX(abs(best_ref_mv.as_mv.row - parent_ref_mv.as_mv.row),
-                       abs(best_ref_mv.as_mv.col - parent_ref_mv.as_mv.col)) <=
-                    4)
+                MAX(abs(best_ref_mv.as_mv.row - parent_ref_mv.as_mv.row),
+                    abs(best_ref_mv.as_mv.col - parent_ref_mv.as_mv.col)) <= 4)
             {
                 d->bmi.mv.as_int = mvp_full.as_int;
                 mode_mv[NEWMV].as_int = mvp_full.as_int;
@@ -1252,10 +1240,7 @@ void vp8_pick_inter_mode(VP8_COMP *cpi, MACROBLOCK *x, int recon_yoffset,
             }
 
             mode_mv[NEWMV].as_int = d->bmi.mv.as_int;
-            // The clamp below is not necessary from the perspective
-            // of VP8 bitstream, but is added to improve ChromeCast
-            // mirroring's robustness. Please do not remove.
-            vp8_clamp_mv2(&mode_mv[this_mode], xd);
+
             /* mv cost; */
             rate2 += vp8_mv_bit_cost(&mode_mv[NEWMV], &best_ref_mv,
                                      cpi->mb.mvcost, 128);
@@ -1263,6 +1248,7 @@ void vp8_pick_inter_mode(VP8_COMP *cpi, MACROBLOCK *x, int recon_yoffset,
 
         case NEARESTMV:
         case NEARMV:
+
             if (mode_mv[this_mode].as_int == 0)
                 continue;
 

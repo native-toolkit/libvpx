@@ -16,7 +16,6 @@
 #include "./vp9_rtcd.h"
 #include "./vpx_dsp_rtcd.h"
 
-#include "vpx_dsp/vpx_dsp_common.h"
 #include "vpx_mem/vpx_mem.h"
 #include "vpx_ports/mem.h"
 
@@ -294,8 +293,8 @@ static void model_rd_for_sb_y_large(VP9_COMP *cpi, BLOCK_SIZE bsize,
 
   if (cpi->common.tx_mode == TX_MODE_SELECT) {
     if (sse > (var << 2))
-      tx_size = VPXMIN(max_txsize_lookup[bsize],
-                       tx_mode_to_biggest_tx_size[cpi->common.tx_mode]);
+      tx_size = MIN(max_txsize_lookup[bsize],
+                    tx_mode_to_biggest_tx_size[cpi->common.tx_mode]);
     else
       tx_size = TX_8X8;
 
@@ -305,8 +304,8 @@ static void model_rd_for_sb_y_large(VP9_COMP *cpi, BLOCK_SIZE bsize,
     else if (tx_size > TX_16X16)
       tx_size = TX_16X16;
   } else {
-    tx_size = VPXMIN(max_txsize_lookup[bsize],
-                     tx_mode_to_biggest_tx_size[cpi->common.tx_mode]);
+    tx_size = MIN(max_txsize_lookup[bsize],
+                  tx_mode_to_biggest_tx_size[cpi->common.tx_mode]);
   }
 
   assert(tx_size >= TX_8X8);
@@ -476,8 +475,8 @@ static void model_rd_for_sb_y(VP9_COMP *cpi, BLOCK_SIZE bsize,
   if (cpi->common.tx_mode == TX_MODE_SELECT) {
     if (sse > (var << 2))
       xd->mi[0]->mbmi.tx_size =
-          VPXMIN(max_txsize_lookup[bsize],
-                 tx_mode_to_biggest_tx_size[cpi->common.tx_mode]);
+          MIN(max_txsize_lookup[bsize],
+              tx_mode_to_biggest_tx_size[cpi->common.tx_mode]);
     else
       xd->mi[0]->mbmi.tx_size = TX_8X8;
 
@@ -488,8 +487,8 @@ static void model_rd_for_sb_y(VP9_COMP *cpi, BLOCK_SIZE bsize,
       xd->mi[0]->mbmi.tx_size = TX_16X16;
   } else {
     xd->mi[0]->mbmi.tx_size =
-        VPXMIN(max_txsize_lookup[bsize],
-               tx_mode_to_biggest_tx_size[cpi->common.tx_mode]);
+        MIN(max_txsize_lookup[bsize],
+            tx_mode_to_biggest_tx_size[cpi->common.tx_mode]);
   }
 
   // Evaluate if the partition block is a skippable block in Y plane.
@@ -619,14 +618,14 @@ static void block_yrd(VP9_COMP *cpi, MACROBLOCK *x, int *rate, int64_t *dist,
                                   scan_order->scan, scan_order->iscan);
             break;
           case TX_16X16:
-            vpx_hadamard_16x16(src_diff, diff_stride, (int16_t *)coeff);
+            vp9_hadamard_16x16(src_diff, diff_stride, (int16_t *)coeff);
             vp9_quantize_fp(coeff, 256, x->skip_block, p->zbin, p->round_fp,
                             p->quant_fp, p->quant_shift, qcoeff, dqcoeff,
                             pd->dequant, eob,
                             scan_order->scan, scan_order->iscan);
             break;
           case TX_8X8:
-            vpx_hadamard_8x8(src_diff, diff_stride, (int16_t *)coeff);
+            vp9_hadamard_8x8(src_diff, diff_stride, (int16_t *)coeff);
             vp9_quantize_fp(coeff, 64, x->skip_block, p->zbin, p->round_fp,
                             p->quant_fp, p->quant_shift, qcoeff, dqcoeff,
                             pd->dequant, eob,
@@ -673,7 +672,7 @@ static void block_yrd(VP9_COMP *cpi, MACROBLOCK *x, int *rate, int64_t *dist,
         if (*eob == 1)
           *rate += (int)abs(qcoeff[0]);
         else if (*eob > 1)
-          *rate += vpx_satd((const int16_t *)qcoeff, step << 4);
+          *rate += (int)vp9_satd((const int16_t *)qcoeff, step << 4);
 
         *dist += vp9_block_error_fp(coeff, dqcoeff, step << 4) >> shift;
       }
@@ -688,11 +687,10 @@ static void block_yrd(VP9_COMP *cpi, MACROBLOCK *x, int *rate, int64_t *dist,
 }
 #endif
 
-static void model_rd_for_sb_uv(VP9_COMP *cpi, BLOCK_SIZE plane_bsize,
+static void model_rd_for_sb_uv(VP9_COMP *cpi, BLOCK_SIZE bsize,
                                MACROBLOCK *x, MACROBLOCKD *xd,
                                int *out_rate_sum, int64_t *out_dist_sum,
-                               unsigned int *var_y, unsigned int *sse_y,
-                               int start_plane, int stop_plane) {
+                               unsigned int *var_y, unsigned int *sse_y) {
   // Note our transform coeffs are 8 times an orthogonal transform.
   // Hence quantizer step is also 8 times. To get effective quantizer
   // we need to divide by 8 before sending to modeling function.
@@ -704,12 +702,12 @@ static void model_rd_for_sb_uv(VP9_COMP *cpi, BLOCK_SIZE plane_bsize,
   *out_rate_sum = 0;
   *out_dist_sum = 0;
 
-  for (i = start_plane; i <= stop_plane; ++i) {
+  for (i = 1; i <= 2; ++i) {
     struct macroblock_plane *const p = &x->plane[i];
     struct macroblockd_plane *const pd = &xd->plane[i];
     const uint32_t dc_quant = pd->dequant[0];
     const uint32_t ac_quant = pd->dequant[1];
-    const BLOCK_SIZE bs = plane_bsize;
+    const BLOCK_SIZE bs = get_plane_block_size(bsize, pd);
     unsigned int var;
 
     if (!x->color_sensitivity[i - 1])
@@ -779,27 +777,21 @@ static void encode_breakout_test(VP9_COMP *cpi, MACROBLOCK *x,
                                  struct buf_2d yv12_mb[][MAX_MB_PLANE],
                                  int *rate, int64_t *dist) {
   MACROBLOCKD *xd = &x->e_mbd;
-  MB_MODE_INFO *const mbmi = &xd->mi[0]->mbmi;
+
   const BLOCK_SIZE uv_size = get_plane_block_size(bsize, &xd->plane[1]);
   unsigned int var = var_y, sse = sse_y;
   // Skipping threshold for ac.
   unsigned int thresh_ac;
   // Skipping threshold for dc.
   unsigned int thresh_dc;
-  int motion_low = 1;
-  if (mbmi->mv[0].as_mv.row > 64 ||
-      mbmi->mv[0].as_mv.row < -64 ||
-      mbmi->mv[0].as_mv.col > 64 ||
-      mbmi->mv[0].as_mv.col < -64)
-    motion_low = 0;
-  if (x->encode_breakout > 0 && motion_low == 1) {
+  if (x->encode_breakout > 0) {
     // Set a maximum for threshold to avoid big PSNR loss in low bit rate
     // case. Use extreme low threshold for static frames to limit
     // skipping.
     const unsigned int max_thresh = 36000;
     // The encode_breakout input
     const unsigned int min_thresh =
-        VPXMIN(((unsigned int)x->encode_breakout << 4), max_thresh);
+        MIN(((unsigned int)x->encode_breakout << 4), max_thresh);
 #if CONFIG_VP9_HIGHBITDEPTH
     const int shift = (xd->bd << 1) - 16;
 #endif
@@ -900,8 +892,12 @@ static void estimate_block_intra(int plane, int block, BLOCK_SIZE plane_bsize,
   int i, j;
   int rate;
   int64_t dist;
+  int64_t this_sse = INT64_MAX;
+  int is_skippable;
 
   txfrm_block_to_raster_xy(plane_bsize, tx_size, block, &i, &j);
+  assert(plane == 0);
+  (void) plane;
 
   p->src.buf = &src_buf_base[4 * (j * src_stride + i)];
   pd->dst.buf = &dst_buf_base[4 * (j * dst_stride + i)];
@@ -911,22 +907,13 @@ static void estimate_block_intra(int plane, int block, BLOCK_SIZE plane_bsize,
                           x->skip_encode ? p->src.buf : pd->dst.buf,
                           x->skip_encode ? src_stride : dst_stride,
                           pd->dst.buf, dst_stride,
-                          i, j, plane);
+                          i, j, 0);
 
-  if (plane == 0) {
-    int64_t this_sse = INT64_MAX;
-    int is_skippable;
-    // TODO(jingning): This needs further refactoring.
-    block_yrd(cpi, x, &rate, &dist, &is_skippable, &this_sse, 0,
-              bsize_tx, VPXMIN(tx_size, TX_16X16));
-    x->skip_txfm[0] = is_skippable;
-    // TODO(jingning): Skip is signalled per prediciton block not per tx block.
-    rate += vp9_cost_bit(vp9_get_skip_prob(&cpi->common, xd), is_skippable);
-  } else {
-    unsigned int var, sse;
-    model_rd_for_sb_uv(cpi, plane_bsize, x, xd, &rate, &dist, &var, &sse,
-                       plane, plane);
-  }
+  // TODO(jingning): This needs further refactoring.
+  block_yrd(cpi, x, &rate, &dist, &is_skippable, &this_sse, 0,
+            bsize_tx, MIN(tx_size, TX_16X16));
+  x->skip_txfm[0] = is_skippable;
+  rate += vp9_cost_bit(vp9_get_skip_prob(&cpi->common, xd), is_skippable);
 
   p->src.buf = src_buf_base;
   pd->dst.buf = dst_buf_base;
@@ -974,8 +961,8 @@ static INLINE void update_thresh_freq_fact(VP9_COMP *cpi,
   if (thr_mode_idx == best_mode_idx)
     *freq_fact -= (*freq_fact >> 4);
   else
-    *freq_fact = VPXMIN(*freq_fact + RD_THRESH_INC,
-                        cpi->sf.adaptive_rd_thresh * RD_THRESH_MAX_FACT);
+    *freq_fact = MIN(*freq_fact + RD_THRESH_INC,
+        cpi->sf.adaptive_rd_thresh * RD_THRESH_MAX_FACT);
 }
 
 void vp9_pick_intra_mode(VP9_COMP *cpi, MACROBLOCK *x, RD_COST *rd_cost,
@@ -986,8 +973,8 @@ void vp9_pick_intra_mode(VP9_COMP *cpi, MACROBLOCK *x, RD_COST *rd_cost,
   PREDICTION_MODE this_mode;
   struct estimate_block_intra_args args = { cpi, x, DC_PRED, 0, 0 };
   const TX_SIZE intra_tx_size =
-      VPXMIN(max_txsize_lookup[bsize],
-             tx_mode_to_biggest_tx_size[cpi->common.tx_mode]);
+      MIN(max_txsize_lookup[bsize],
+          tx_mode_to_biggest_tx_size[cpi->common.tx_mode]);
   MODE_INFO *const mic = xd->mi[0];
   int *bmode_costs;
   const MODE_INFO *above_mi = xd->mi[-xd->mi_stride];
@@ -1074,18 +1061,6 @@ static const REF_MODE ref_mode_set_svc[RT_INTER_MODES] = {
     {GOLDEN_FRAME, NEWMV}
 };
 
-int set_intra_cost_penalty(const VP9_COMP *const cpi, BLOCK_SIZE bsize) {
-  const VP9_COMMON *const cm = &cpi->common;
-  // Reduce the intra cost penalty for small blocks (<=16x16).
-  int reduction_fac =
-      (bsize <= BLOCK_16X16) ? ((bsize <= BLOCK_8X8) ? 4 : 2) : 0;
-  if (cpi->noise_estimate.enabled && cpi->noise_estimate.level == kHigh)
-     // Don't reduce intra cost penalty if estimated noise level is high.
-     reduction_fac = 0;
-  return vp9_get_intra_cost_penalty(
-      cm->base_qindex, cm->y_dc_delta_q, cm->bit_depth) >> reduction_fac;
-}
-
 // TODO(jingning) placeholder for inter-frame non-RD mode decision.
 // this needs various further optimizations. to be continued..
 void vp9_pick_inter_mode(VP9_COMP *cpi, MACROBLOCK *x,
@@ -1094,7 +1069,6 @@ void vp9_pick_inter_mode(VP9_COMP *cpi, MACROBLOCK *x,
                          BLOCK_SIZE bsize, PICK_MODE_CONTEXT *ctx) {
   VP9_COMMON *const cm = &cpi->common;
   SPEED_FEATURES *const sf = &cpi->sf;
-  const SVC *const svc = &cpi->svc;
   TileInfo *const tile_info = &tile_data->tile_info;
   MACROBLOCKD *const xd = &x->e_mbd;
   MB_MODE_INFO *const mbmi = &xd->mi[0]->mbmi;
@@ -1113,7 +1087,11 @@ void vp9_pick_inter_mode(VP9_COMP *cpi, MACROBLOCK *x,
   // var_y and sse_y are saved to be used in skipping checking
   unsigned int var_y = UINT_MAX;
   unsigned int sse_y = UINT_MAX;
-  const int intra_cost_penalty = set_intra_cost_penalty(cpi, bsize);
+  // Reduce the intra cost penalty for small blocks (<=16x16).
+  const int reduction_fac = (bsize <= BLOCK_16X16) ?
+      ((bsize <= BLOCK_8X8) ? 4 : 2) : 0;
+  const int intra_cost_penalty = vp9_get_intra_cost_penalty(
+      cm->base_qindex, cm->y_dc_delta_q, cm->bit_depth) >> reduction_fac;
   const int64_t inter_mode_thresh = RDCOST(x->rdmult, x->rddiv,
                                            intra_cost_penalty, 0);
   const int *const rd_threshes = cpi->rd.threshes[mbmi->segment_id][bsize];
@@ -1144,10 +1122,6 @@ void vp9_pick_inter_mode(VP9_COMP *cpi, MACROBLOCK *x,
   int best_pred_sad = INT_MAX;
   int best_early_term = 0;
   int ref_frame_cost[MAX_REF_FRAMES];
-  int svc_force_zero_mode[3] = {0};
-#if CONFIG_VP9_TEMPORAL_DENOISING
-  int64_t zero_last_cost_orig = INT64_MAX;
-#endif
 
   init_ref_frame_cost(cm, xd, ref_frame_cost);
 
@@ -1186,8 +1160,8 @@ void vp9_pick_inter_mode(VP9_COMP *cpi, MACROBLOCK *x,
   mbmi->sb_type = bsize;
   mbmi->ref_frame[0] = NONE;
   mbmi->ref_frame[1] = NONE;
-  mbmi->tx_size = VPXMIN(max_txsize_lookup[bsize],
-                         tx_mode_to_biggest_tx_size[cm->tx_mode]);
+  mbmi->tx_size = MIN(max_txsize_lookup[bsize],
+                      tx_mode_to_biggest_tx_size[cm->tx_mode]);
 
 #if CONFIG_VP9_TEMPORAL_DENOISING
   vp9_denoiser_reset_frame_stats(ctx);
@@ -1198,17 +1172,6 @@ void vp9_pick_inter_mode(VP9_COMP *cpi, MACROBLOCK *x,
   } else {
     usable_ref_frame = GOLDEN_FRAME;
   }
-
-  // If the reference is temporally aligned with current superframe
-  // (e.g., spatial reference within superframe), constrain the inter mode:
-  // for now only test zero motion.
-  if (cpi->use_svc && svc ->force_zero_mode_spatial_ref) {
-    if (svc->ref_frame_index[cpi->lst_fb_idx] == svc->current_superframe)
-      svc_force_zero_mode[LAST_FRAME - 1] = 1;
-    if (svc->ref_frame_index[cpi->gld_fb_idx] == svc->current_superframe)
-      svc_force_zero_mode[GOLDEN_FRAME - 1] = 1;
-  }
-
   for (ref_frame = LAST_FRAME; ref_frame <= usable_ref_frame; ++ref_frame) {
     const YV12_BUFFER_CONFIG *yv12 = get_ref_frame_buffer(cpi, ref_frame);
 
@@ -1261,25 +1224,17 @@ void vp9_pick_inter_mode(VP9_COMP *cpi, MACROBLOCK *x,
       continue;
 
     ref_frame = ref_mode_set[idx].ref_frame;
-    if (cpi->use_svc) {
+    if (cpi->use_svc)
       ref_frame = ref_mode_set_svc[idx].ref_frame;
-      if (svc_force_zero_mode[ref_frame - 1] &&
-          frame_mv[this_mode][ref_frame].as_int != 0)
-        continue;
-    }
-
     if (!(cpi->ref_frame_flags & flag_list[ref_frame]))
       continue;
     if (const_motion[ref_frame] && this_mode == NEARMV)
       continue;
 
-    if (!(frame_mv[this_mode][ref_frame].as_int == 0 &&
-        ref_frame == LAST_FRAME)) {
-      i = (ref_frame == LAST_FRAME) ? GOLDEN_FRAME : LAST_FRAME;
-      if ((cpi->ref_frame_flags & flag_list[i]) && sf->reference_masking)
-        if (x->pred_mv_sad[ref_frame] > (x->pred_mv_sad[i] << 1))
-          ref_frame_skip_mask |= (1 << ref_frame);
-    }
+    i = (ref_frame == LAST_FRAME) ? GOLDEN_FRAME : LAST_FRAME;
+    if ((cpi->ref_frame_flags & flag_list[i]) && sf->reference_masking)
+      if (x->pred_mv_sad[ref_frame] > (x->pred_mv_sad[i] << 1))
+        ref_frame_skip_mask |= (1 << ref_frame);
     if (ref_frame_skip_mask & (1 << ref_frame))
       continue;
 
@@ -1459,7 +1414,7 @@ void vp9_pick_inter_mode(VP9_COMP *cpi, MACROBLOCK *x,
     if (!this_early_term) {
       this_sse = (int64_t)sse_y;
       block_yrd(cpi, x, &this_rdc.rate, &this_rdc.dist, &is_skippable,
-                &this_sse, 0, bsize, VPXMIN(mbmi->tx_size, TX_16X16));
+                &this_sse, 0, bsize, MIN(mbmi->tx_size, TX_16X16));
       x->skip_txfm[0] = is_skippable;
       if (is_skippable) {
         this_rdc.rate = vp9_cost_bit(vp9_get_skip_prob(cm, xd), 1);
@@ -1487,13 +1442,12 @@ void vp9_pick_inter_mode(VP9_COMP *cpi, MACROBLOCK *x,
     if (x->color_sensitivity[0] || x->color_sensitivity[1]) {
       int uv_rate = 0;
       int64_t uv_dist = 0;
-      const BLOCK_SIZE uv_bsize = get_plane_block_size(bsize, &xd->plane[1]);
       if (x->color_sensitivity[0])
         vp9_build_inter_predictors_sbp(xd, mi_row, mi_col, bsize, 1);
       if (x->color_sensitivity[1])
         vp9_build_inter_predictors_sbp(xd, mi_row, mi_col, bsize, 2);
-      model_rd_for_sb_uv(cpi, uv_bsize, x, xd, &uv_rate, &uv_dist,
-                         &var_y, &sse_y, 1, 2);
+      model_rd_for_sb_uv(cpi, bsize, x, xd, &uv_rate, &uv_dist,
+                         &var_y, &sse_y);
       this_rdc.rate += uv_rate;
       this_rdc.dist += uv_dist;
     }
@@ -1504,32 +1458,6 @@ void vp9_pick_inter_mode(VP9_COMP *cpi, MACROBLOCK *x,
             this_mode)];
     this_rdc.rate += ref_frame_cost[ref_frame];
     this_rdc.rdcost = RDCOST(x->rdmult, x->rddiv, this_rdc.rate, this_rdc.dist);
-
-    if (cpi->oxcf.speed >= 5 &&
-        cpi->oxcf.content != VP9E_CONTENT_SCREEN) {
-      // Bias against non-zero (above some threshold) motion for large blocks.
-      // This is temporary fix to avoid selection of large mv for big blocks.
-      if (frame_mv[this_mode][ref_frame].as_mv.row > 64 ||
-          frame_mv[this_mode][ref_frame].as_mv.row < -64 ||
-          frame_mv[this_mode][ref_frame].as_mv.col > 64 ||
-          frame_mv[this_mode][ref_frame].as_mv.col < -64) {
-        if (bsize == BLOCK_64X64)
-          this_rdc.rdcost = this_rdc.rdcost << 1;
-        else if (bsize >= BLOCK_32X32)
-          this_rdc.rdcost = 3 * this_rdc.rdcost >> 1;
-      }
-      // If noise estimation is enabled, and estimated level is above threshold,
-      // add a bias to LAST reference with small motion, for large blocks.
-      if (cpi->noise_estimate.enabled &&
-          cpi->noise_estimate.level >= kMedium &&
-          bsize >= BLOCK_32X32 &&
-          ref_frame == LAST_FRAME &&
-          frame_mv[this_mode][ref_frame].as_mv.row < 8 &&
-          frame_mv[this_mode][ref_frame].as_mv.row > -8 &&
-          frame_mv[this_mode][ref_frame].as_mv.col < 8 &&
-          frame_mv[this_mode][ref_frame].as_mv.col > -8)
-        this_rdc.rdcost = 7 * this_rdc.rdcost >> 3;
-    }
 
     // Skipping checking: test to see if this block can be reconstructed by
     // prediction only.
@@ -1545,12 +1473,8 @@ void vp9_pick_inter_mode(VP9_COMP *cpi, MACROBLOCK *x,
     }
 
 #if CONFIG_VP9_TEMPORAL_DENOISING
-    if (cpi->oxcf.noise_sensitivity > 0) {
+    if (cpi->oxcf.noise_sensitivity > 0)
       vp9_denoiser_update_frame_stats(mbmi, sse_y, this_mode, ctx);
-      // Keep track of zero_last cost.
-      if (ref_frame == LAST_FRAME && frame_mv[this_mode][ref_frame].as_int == 0)
-        zero_last_cost_orig = this_rdc.rdcost;
-    }
 #else
     (void)ctx;
 #endif
@@ -1598,13 +1522,11 @@ void vp9_pick_inter_mode(VP9_COMP *cpi, MACROBLOCK *x,
       (!x->skip && best_rdc.rdcost > inter_mode_thresh &&
        bsize <= cpi->sf.max_intra_bsize)) {
     struct estimate_block_intra_args args = { cpi, x, DC_PRED, 0, 0 };
+    const TX_SIZE intra_tx_size =
+        MIN(max_txsize_lookup[bsize],
+            tx_mode_to_biggest_tx_size[cpi->common.tx_mode]);
     int i;
     TX_SIZE best_intra_tx_size = TX_SIZES;
-    TX_SIZE intra_tx_size =
-        VPXMIN(max_txsize_lookup[bsize],
-               tx_mode_to_biggest_tx_size[cpi->common.tx_mode]);
-    if (cpi->oxcf.content != VP9E_CONTENT_SCREEN && intra_tx_size > TX_16X16)
-      intra_tx_size = TX_16X16;
 
     if (reuse_inter_pred && best_pred != NULL) {
       if (best_pred->data == orig_dst.buf) {
@@ -1648,15 +1570,6 @@ void vp9_pick_inter_mode(VP9_COMP *cpi, MACROBLOCK *x,
       mbmi->tx_size = intra_tx_size;
       vp9_foreach_transformed_block_in_plane(xd, bsize, 0,
                                              estimate_block_intra, &args);
-      // Inter and intra RD will mismatch in scale for non-screen content.
-      if (cpi->oxcf.content == VP9E_CONTENT_SCREEN) {
-        if (x->color_sensitivity[0])
-          vp9_foreach_transformed_block_in_plane(xd, bsize, 1,
-                                                 estimate_block_intra, &args);
-        if (x->color_sensitivity[1])
-          vp9_foreach_transformed_block_in_plane(xd, bsize, 2,
-                                                 estimate_block_intra, &args);
-      }
       this_rdc.rate = args.rate;
       this_rdc.dist = args.dist;
       this_rdc.rate += cpi->mbmode_cost[this_mode];
@@ -1707,62 +1620,6 @@ void vp9_pick_inter_mode(VP9_COMP *cpi, MACROBLOCK *x,
 #endif  // CONFIG_VP9_HIGHBITDEPTH
     }
   }
-
-#if CONFIG_VP9_TEMPORAL_DENOISING
-  if (cpi->oxcf.noise_sensitivity > 0 &&
-      cpi->resize_pending == 0) {
-    VP9_DENOISER_DECISION decision = COPY_BLOCK;
-    vp9_denoiser_denoise(&cpi->denoiser, x, mi_row, mi_col,
-                         VPXMAX(BLOCK_8X8, bsize), ctx, &decision);
-    // If INTRA or GOLDEN reference was selected, re-evaluate ZEROMV on denoised
-    // result. Only do this under noise conditions, and if rdcost of ZEROMV on
-    // original source is not significantly higher than rdcost of best mode.
-    if (((best_ref_frame == INTRA_FRAME && decision >= FILTER_BLOCK) ||
-        (best_ref_frame == GOLDEN_FRAME && decision == FILTER_ZEROMV_BLOCK)) &&
-        cpi->noise_estimate.enabled &&
-        cpi->noise_estimate.level > kLow &&
-        zero_last_cost_orig < (best_rdc.rdcost << 3)) {
-      // Check if we should pick ZEROMV on denoised signal.
-      int rate = 0;
-      int64_t dist = 0;
-      mbmi->mode = ZEROMV;
-      mbmi->ref_frame[0] = LAST_FRAME;
-      mbmi->ref_frame[1] = NONE;
-      mbmi->mv[0].as_int = 0;
-      mbmi->interp_filter = EIGHTTAP;
-      xd->plane[0].pre[0] = yv12_mb[LAST_FRAME][0];
-      vp9_build_inter_predictors_sby(xd, mi_row, mi_col, bsize);
-      model_rd_for_sb_y(cpi, bsize, x, xd, &rate, &dist, &var_y, &sse_y);
-      this_rdc.rate = rate + ref_frame_cost[LAST_FRAME] +
-          cpi->inter_mode_cost[x->mbmi_ext->mode_context[LAST_FRAME]]
-                              [INTER_OFFSET(ZEROMV)];
-      this_rdc.dist = dist;
-      this_rdc.rdcost = RDCOST(x->rdmult, x->rddiv, rate, dist);
-      // Switch to ZEROMV if the rdcost for ZEROMV on denoised source
-      // is lower than best_ref mode (on original source).
-      if (this_rdc.rdcost > best_rdc.rdcost) {
-        this_rdc = best_rdc;
-        mbmi->mode = best_mode;
-        mbmi->ref_frame[0] = best_ref_frame;
-        mbmi->interp_filter = best_pred_filter;
-        if (best_ref_frame == INTRA_FRAME)
-          mbmi->mv[0].as_int = INVALID_MV;
-        else if (best_ref_frame == GOLDEN_FRAME) {
-          mbmi->mv[0].as_int = frame_mv[best_mode][best_ref_frame].as_int;
-          if (reuse_inter_pred) {
-            xd->plane[0].pre[0] = yv12_mb[GOLDEN_FRAME][0];
-            vp9_build_inter_predictors_sby(xd, mi_row, mi_col, bsize);
-          }
-        }
-        mbmi->tx_size = best_tx_size;
-        x->skip_txfm[0] = best_mode_skip_txfm;
-      } else {
-        best_ref_frame = LAST_FRAME;
-        best_rdc = this_rdc;
-      }
-    }
-  }
-#endif
 
   if (cpi->sf.adaptive_rd_thresh) {
     THR_MODES best_mode_idx = mode_idx[best_ref_frame][mode_offset(mbmi->mode)];

@@ -443,9 +443,7 @@ struct tokenize_b_args {
   TOKENEXTRA **tp;
 };
 
-static void set_entropy_context_b(int plane, int block,
-                                  int blk_row, int blk_col,
-                                  BLOCK_SIZE plane_bsize,
+static void set_entropy_context_b(int plane, int block, BLOCK_SIZE plane_bsize,
                                   TX_SIZE tx_size, void *arg) {
   struct tokenize_b_args* const args = arg;
   ThreadData *const td = args->td;
@@ -453,8 +451,10 @@ static void set_entropy_context_b(int plane, int block,
   MACROBLOCKD *const xd = &x->e_mbd;
   struct macroblock_plane *p = &x->plane[plane];
   struct macroblockd_plane *pd = &xd->plane[plane];
+  int aoff, loff;
+  txfrm_block_to_raster_xy(plane_bsize, tx_size, block, &aoff, &loff);
   vp10_set_contexts(xd, pd, plane_bsize, tx_size, p->eobs[block] > 0,
-                    blk_col, blk_row);
+                   aoff, loff);
 }
 
 static INLINE void add_token(TOKENEXTRA **t, const vpx_prob *context_tree,
@@ -487,8 +487,7 @@ static INLINE int get_tx_eob(const struct segmentation *seg, int segment_id,
   return segfeature_active(seg, segment_id, SEG_LVL_SKIP) ? 0 : eob_max;
 }
 
-static void tokenize_b(int plane, int block, int blk_row, int blk_col,
-                       BLOCK_SIZE plane_bsize,
+static void tokenize_b(int plane, int block, BLOCK_SIZE plane_bsize,
                        TX_SIZE tx_size, void *arg) {
   struct tokenize_b_args* const args = arg;
   VP10_COMP *cpi = args->cpi;
@@ -508,8 +507,7 @@ static void tokenize_b(int plane, int block, int blk_row, int blk_col,
   const tran_low_t *qcoeff = BLOCK_OFFSET(p->qcoeff, block);
   const int segment_id = mbmi->segment_id;
   const int16_t *scan, *nb;
-  const TX_TYPE tx_type = get_tx_type(type, xd, block);
-  const scan_order *const so = get_scan(tx_size, tx_type);
+  const scan_order *so;
   const int ref = is_inter_block(mbmi);
   unsigned int (*const counts)[COEFF_CONTEXTS][ENTROPY_TOKENS] =
       td->rd_counts.coef_counts[tx_size][type][ref];
@@ -521,8 +519,12 @@ static void tokenize_b(int plane, int block, int blk_row, int blk_col,
   const int seg_eob = get_tx_eob(&cpi->common.seg, segment_id, tx_size);
   int16_t token;
   EXTRABIT extra;
-  pt = get_entropy_context(tx_size, pd->above_context + blk_col,
-                           pd->left_context + blk_row);
+  int aoff, loff;
+  txfrm_block_to_raster_xy(plane_bsize, tx_size, block, &aoff, &loff);
+
+  pt = get_entropy_context(tx_size, pd->above_context + aoff,
+                           pd->left_context + loff);
+  so = get_scan(xd, tx_size, type, block);
   scan = so->scan;
   nb = so->neighbors;
   c = 0;
@@ -562,22 +564,20 @@ static void tokenize_b(int plane, int block, int blk_row, int blk_col,
 
   *tp = t;
 
-  vp10_set_contexts(xd, pd, plane_bsize, tx_size, c > 0, blk_col, blk_row);
+  vp10_set_contexts(xd, pd, plane_bsize, tx_size, c > 0, aoff, loff);
 }
 
 struct is_skippable_args {
   uint16_t *eobs;
   int *skippable;
 };
-static void is_skippable(int plane, int block, int blk_row, int blk_col,
+static void is_skippable(int plane, int block,
                          BLOCK_SIZE plane_bsize, TX_SIZE tx_size,
                          void *argv) {
   struct is_skippable_args *args = argv;
   (void)plane;
   (void)plane_bsize;
   (void)tx_size;
-  (void)blk_row;
-  (void)blk_col;
   args->skippable[0] &= (!args->eobs[block]);
 }
 
@@ -591,15 +591,13 @@ int vp10_is_skippable_in_plane(MACROBLOCK *x, BLOCK_SIZE bsize, int plane) {
   return result;
 }
 
-static void has_high_freq_coeff(int plane, int block, int blk_row, int blk_col,
+static void has_high_freq_coeff(int plane, int block,
                                 BLOCK_SIZE plane_bsize, TX_SIZE tx_size,
                                 void *argv) {
   struct is_skippable_args *args = argv;
   int eobs = (tx_size == TX_4X4) ? 3 : 10;
   (void) plane;
   (void) plane_bsize;
-  (void) blk_row;
-  (void) blk_col;
 
   *(args->skippable) |= (args->eobs[block] > eobs);
 }
@@ -630,16 +628,8 @@ void vp10_tokenize_sb(VP10_COMP *cpi, ThreadData *td, TOKENEXTRA **t,
   }
 
   if (!dry_run) {
-    int plane;
-
     td->counts->skip[ctx][0] += skip_inc;
-
-    for (plane = 0; plane < MAX_MB_PLANE; ++plane) {
-      vp10_foreach_transformed_block_in_plane(xd, bsize, plane, tokenize_b,
-                                              &arg);
-      (*t)->token = EOSB_TOKEN;
-      (*t)++;
-    }
+    vp10_foreach_transformed_block(xd, bsize, tokenize_b, &arg);
   } else {
     vp10_foreach_transformed_block(xd, bsize, set_entropy_context_b, &arg);
   }

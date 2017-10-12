@@ -203,6 +203,123 @@ void vpx_filter_block1d8_h8_intrin_ssse3(const uint8_t *src_ptr,
   }
 }
 
+static void vpx_filter_block1d16_h8_intrin_ssse3(const uint8_t *src_ptr,
+                                                 ptrdiff_t src_pixels_per_line,
+                                                 uint8_t *output_ptr,
+                                                 ptrdiff_t output_pitch,
+                                                 uint32_t output_height,
+                                                 const int16_t *filter) {
+  __m128i addFilterReg64, filtersReg, srcReg1, srcReg2;
+  __m128i filt1Reg, filt2Reg, filt3Reg, filt4Reg;
+  __m128i firstFilters, secondFilters, thirdFilters, forthFilters;
+  __m128i srcRegFilt1_1, srcRegFilt2_1, srcRegFilt2, srcRegFilt3;
+  unsigned int i;
+
+  // create a register with 0,64,0,64,0,64,0,64,0,64,0,64,0,64,0,64
+  addFilterReg64 = _mm_set1_epi32((int)0x0400040u);
+  filtersReg = _mm_loadu_si128((const __m128i *)filter);
+  // converting the 16 bit (short) to  8 bit (byte) and have the same data
+  // in both lanes of 128 bit register.
+  filtersReg =_mm_packs_epi16(filtersReg, filtersReg);
+
+  // duplicate only the first 16 bits (first and second byte)
+  // across 128 bit register
+  firstFilters = _mm_shuffle_epi8(filtersReg, _mm_set1_epi16(0x100u));
+  // duplicate only the second 16 bits (third and forth byte)
+  // across 128 bit register
+  secondFilters = _mm_shuffle_epi8(filtersReg, _mm_set1_epi16(0x302u));
+  // duplicate only the third 16 bits (fifth and sixth byte)
+  // across 128 bit register
+  thirdFilters = _mm_shuffle_epi8(filtersReg, _mm_set1_epi16(0x504u));
+  // duplicate only the forth 16 bits (seventh and eighth byte)
+  // across 128 bit register
+  forthFilters = _mm_shuffle_epi8(filtersReg, _mm_set1_epi16(0x706u));
+
+  filt1Reg = _mm_load_si128((__m128i const *)filt1_global);
+  filt2Reg = _mm_load_si128((__m128i const *)filt2_global);
+  filt3Reg = _mm_load_si128((__m128i const *)filt3_global);
+  filt4Reg = _mm_load_si128((__m128i const *)filt4_global);
+
+  for (i = 0; i < output_height; i++) {
+    srcReg1 = _mm_loadu_si128((const __m128i *)(src_ptr - 3));
+
+    // filter the source buffer
+    srcRegFilt1_1= _mm_shuffle_epi8(srcReg1, filt1Reg);
+    srcRegFilt2= _mm_shuffle_epi8(srcReg1, filt4Reg);
+
+    // multiply 2 adjacent elements with the filter and add the result
+    srcRegFilt1_1 = _mm_maddubs_epi16(srcRegFilt1_1, firstFilters);
+    srcRegFilt2 = _mm_maddubs_epi16(srcRegFilt2, forthFilters);
+
+    // add and saturate the results together
+    srcRegFilt1_1 = _mm_adds_epi16(srcRegFilt1_1, srcRegFilt2);
+
+    // filter the source buffer
+    srcRegFilt3= _mm_shuffle_epi8(srcReg1, filt2Reg);
+    srcRegFilt2= _mm_shuffle_epi8(srcReg1, filt3Reg);
+
+    // multiply 2 adjacent elements with the filter and add the result
+    srcRegFilt3 = _mm_maddubs_epi16(srcRegFilt3, secondFilters);
+    srcRegFilt2 = _mm_maddubs_epi16(srcRegFilt2, thirdFilters);
+
+    // add and saturate the results together
+    srcRegFilt1_1 = _mm_adds_epi16(srcRegFilt1_1,
+                                   _mm_min_epi16(srcRegFilt3, srcRegFilt2));
+
+    // reading the next 16 bytes.
+    // (part of it was being read by earlier read)
+    srcReg2 = _mm_loadu_si128((const __m128i *)(src_ptr + 5));
+
+    // add and saturate the results together
+    srcRegFilt1_1 = _mm_adds_epi16(srcRegFilt1_1,
+                                   _mm_max_epi16(srcRegFilt3, srcRegFilt2));
+
+    // filter the source buffer
+    srcRegFilt2_1= _mm_shuffle_epi8(srcReg2, filt1Reg);
+    srcRegFilt2= _mm_shuffle_epi8(srcReg2, filt4Reg);
+
+    // multiply 2 adjacent elements with the filter and add the result
+    srcRegFilt2_1 = _mm_maddubs_epi16(srcRegFilt2_1, firstFilters);
+    srcRegFilt2 = _mm_maddubs_epi16(srcRegFilt2, forthFilters);
+
+    // add and saturate the results together
+    srcRegFilt2_1 = _mm_adds_epi16(srcRegFilt2_1, srcRegFilt2);
+
+    // filter the source buffer
+    srcRegFilt3= _mm_shuffle_epi8(srcReg2, filt2Reg);
+    srcRegFilt2= _mm_shuffle_epi8(srcReg2, filt3Reg);
+
+    // multiply 2 adjacent elements with the filter and add the result
+    srcRegFilt3 = _mm_maddubs_epi16(srcRegFilt3, secondFilters);
+    srcRegFilt2 = _mm_maddubs_epi16(srcRegFilt2, thirdFilters);
+
+    // add and saturate the results together
+    srcRegFilt2_1 = _mm_adds_epi16(srcRegFilt2_1,
+    _mm_min_epi16(srcRegFilt3, srcRegFilt2));
+    srcRegFilt2_1 = _mm_adds_epi16(srcRegFilt2_1,
+    _mm_max_epi16(srcRegFilt3, srcRegFilt2));
+
+    srcRegFilt1_1 = _mm_adds_epi16(srcRegFilt1_1, addFilterReg64);
+    srcRegFilt2_1 = _mm_adds_epi16(srcRegFilt2_1, addFilterReg64);
+
+    // shift by 7 bit each 16 bit
+    srcRegFilt1_1 = _mm_srai_epi16(srcRegFilt1_1, 7);
+    srcRegFilt2_1 = _mm_srai_epi16(srcRegFilt2_1, 7);
+
+    // shrink to 8 bit each 16 bits, the first lane contain the first
+    // convolve result and the second lane contain the second convolve
+    // result
+    srcRegFilt1_1 = _mm_packus_epi16(srcRegFilt1_1, srcRegFilt2_1);
+
+    src_ptr+=src_pixels_per_line;
+
+    // save 16 bytes
+    _mm_store_si128((__m128i*)output_ptr, srcRegFilt1_1);
+
+    output_ptr+=output_pitch;
+  }
+}
+
 void vpx_filter_block1d8_v8_intrin_ssse3(const uint8_t *src_ptr,
                                          ptrdiff_t src_pitch,
                                          uint8_t *output_ptr,
@@ -291,12 +408,141 @@ void vpx_filter_block1d8_v8_intrin_ssse3(const uint8_t *src_ptr,
   }
 }
 
+static void vpx_filter_block1d16_v8_intrin_ssse3(const uint8_t *src_ptr,
+                                                 ptrdiff_t src_pitch,
+                                                 uint8_t *output_ptr,
+                                                 ptrdiff_t out_pitch,
+                                                 uint32_t output_height,
+                                                 const int16_t *filter) {
+  __m128i addFilterReg64, filtersReg, srcRegFilt1, srcRegFilt3;
+  __m128i firstFilters, secondFilters, thirdFilters, forthFilters;
+  __m128i srcRegFilt5, srcRegFilt6, srcRegFilt7, srcRegFilt8;
+  __m128i srcReg1, srcReg2, srcReg3, srcReg4, srcReg5, srcReg6, srcReg7;
+  __m128i srcReg8;
+  unsigned int i;
+
+  // create a register with 0,64,0,64,0,64,0,64,0,64,0,64,0,64,0,64
+  addFilterReg64 = _mm_set1_epi32((int)0x0400040u);
+  filtersReg = _mm_loadu_si128((const __m128i *)filter);
+  // converting the 16 bit (short) to  8 bit (byte) and have the same data
+  // in both lanes of 128 bit register.
+  filtersReg =_mm_packs_epi16(filtersReg, filtersReg);
+
+  // duplicate only the first 16 bits in the filter
+  firstFilters = _mm_shuffle_epi8(filtersReg, _mm_set1_epi16(0x100u));
+  // duplicate only the second 16 bits in the filter
+  secondFilters = _mm_shuffle_epi8(filtersReg, _mm_set1_epi16(0x302u));
+  // duplicate only the third 16 bits in the filter
+  thirdFilters = _mm_shuffle_epi8(filtersReg, _mm_set1_epi16(0x504u));
+  // duplicate only the forth 16 bits in the filter
+  forthFilters = _mm_shuffle_epi8(filtersReg, _mm_set1_epi16(0x706u));
+
+  // load the first 7 rows of 16 bytes
+  srcReg1 = _mm_loadu_si128((const __m128i *)(src_ptr));
+  srcReg2 = _mm_loadu_si128((const __m128i *)(src_ptr + src_pitch));
+  srcReg3 = _mm_loadu_si128((const __m128i *)(src_ptr + src_pitch * 2));
+  srcReg4 = _mm_loadu_si128((const __m128i *)(src_ptr + src_pitch * 3));
+  srcReg5 = _mm_loadu_si128((const __m128i *)(src_ptr + src_pitch * 4));
+  srcReg6 = _mm_loadu_si128((const __m128i *)(src_ptr + src_pitch * 5));
+  srcReg7 = _mm_loadu_si128((const __m128i *)(src_ptr + src_pitch * 6));
+
+  for (i = 0; i < output_height; i++) {
+    // load the last 16 bytes
+    srcReg8 = _mm_loadu_si128((const __m128i *)(src_ptr + src_pitch * 7));
+
+    // merge the result together
+    srcRegFilt5 = _mm_unpacklo_epi8(srcReg1, srcReg2);
+    srcRegFilt6 = _mm_unpacklo_epi8(srcReg7, srcReg8);
+    srcRegFilt1 = _mm_unpackhi_epi8(srcReg1, srcReg2);
+    srcRegFilt3 = _mm_unpackhi_epi8(srcReg7, srcReg8);
+
+    // multiply 2 adjacent elements with the filter and add the result
+    srcRegFilt5 = _mm_maddubs_epi16(srcRegFilt5, firstFilters);
+    srcRegFilt6 = _mm_maddubs_epi16(srcRegFilt6, forthFilters);
+    srcRegFilt1 = _mm_maddubs_epi16(srcRegFilt1, firstFilters);
+    srcRegFilt3 = _mm_maddubs_epi16(srcRegFilt3, forthFilters);
+
+    // add and saturate the results together
+    srcRegFilt5 = _mm_adds_epi16(srcRegFilt5, srcRegFilt6);
+    srcRegFilt1 = _mm_adds_epi16(srcRegFilt1, srcRegFilt3);
+
+    // merge the result together
+    srcRegFilt3 = _mm_unpacklo_epi8(srcReg3, srcReg4);
+    srcRegFilt6 = _mm_unpackhi_epi8(srcReg3, srcReg4);
+
+    // multiply 2 adjacent elements with the filter and add the result
+    srcRegFilt3 = _mm_maddubs_epi16(srcRegFilt3, secondFilters);
+    srcRegFilt6 = _mm_maddubs_epi16(srcRegFilt6, secondFilters);
+
+    // merge the result together
+    srcRegFilt7 = _mm_unpacklo_epi8(srcReg5, srcReg6);
+    srcRegFilt8 = _mm_unpackhi_epi8(srcReg5, srcReg6);
+
+    // multiply 2 adjacent elements with the filter and add the result
+    srcRegFilt7 = _mm_maddubs_epi16(srcRegFilt7, thirdFilters);
+    srcRegFilt8 = _mm_maddubs_epi16(srcRegFilt8, thirdFilters);
+
+    // add and saturate the results together
+    srcRegFilt5 = _mm_adds_epi16(srcRegFilt5,
+                                 _mm_min_epi16(srcRegFilt3, srcRegFilt7));
+    srcRegFilt1 = _mm_adds_epi16(srcRegFilt1,
+                                 _mm_min_epi16(srcRegFilt6, srcRegFilt8));
+
+    // add and saturate the results together
+    srcRegFilt5 = _mm_adds_epi16(srcRegFilt5,
+                                 _mm_max_epi16(srcRegFilt3, srcRegFilt7));
+    srcRegFilt1 = _mm_adds_epi16(srcRegFilt1,
+                                 _mm_max_epi16(srcRegFilt6, srcRegFilt8));
+    srcRegFilt5 = _mm_adds_epi16(srcRegFilt5, addFilterReg64);
+    srcRegFilt1 = _mm_adds_epi16(srcRegFilt1, addFilterReg64);
+
+    // shift by 7 bit each 16 bit
+    srcRegFilt5 = _mm_srai_epi16(srcRegFilt5, 7);
+    srcRegFilt1 = _mm_srai_epi16(srcRegFilt1, 7);
+
+    // shrink to 8 bit each 16 bits, the first lane contain the first
+    // convolve result and the second lane contain the second convolve
+    // result
+    srcRegFilt1 = _mm_packus_epi16(srcRegFilt5, srcRegFilt1);
+
+    src_ptr+=src_pitch;
+
+    // shift down a row
+    srcReg1 = srcReg2;
+    srcReg2 = srcReg3;
+    srcReg3 = srcReg4;
+    srcReg4 = srcReg5;
+    srcReg5 = srcReg6;
+    srcReg6 = srcReg7;
+    srcReg7 = srcReg8;
+
+    // save 16 bytes convolve result
+    _mm_store_si128((__m128i*)output_ptr, srcRegFilt1);
+
+    output_ptr+=out_pitch;
+  }
+}
+
+#if ARCH_X86_64
+filter8_1dfunction vpx_filter_block1d16_v8_intrin_ssse3;
+filter8_1dfunction vpx_filter_block1d16_h8_intrin_ssse3;
+filter8_1dfunction vpx_filter_block1d8_v8_intrin_ssse3;
+filter8_1dfunction vpx_filter_block1d8_h8_intrin_ssse3;
+filter8_1dfunction vpx_filter_block1d4_v8_ssse3;
+filter8_1dfunction vpx_filter_block1d4_h8_intrin_ssse3;
+#define vpx_filter_block1d16_v8_ssse3 vpx_filter_block1d16_v8_intrin_ssse3
+#define vpx_filter_block1d16_h8_ssse3 vpx_filter_block1d16_h8_intrin_ssse3
+#define vpx_filter_block1d8_v8_ssse3 vpx_filter_block1d8_v8_intrin_ssse3
+#define vpx_filter_block1d8_h8_ssse3 vpx_filter_block1d8_h8_intrin_ssse3
+#define vpx_filter_block1d4_h8_ssse3 vpx_filter_block1d4_h8_intrin_ssse3
+#else  // ARCH_X86
 filter8_1dfunction vpx_filter_block1d16_v8_ssse3;
 filter8_1dfunction vpx_filter_block1d16_h8_ssse3;
 filter8_1dfunction vpx_filter_block1d8_v8_ssse3;
 filter8_1dfunction vpx_filter_block1d8_h8_ssse3;
 filter8_1dfunction vpx_filter_block1d4_v8_ssse3;
 filter8_1dfunction vpx_filter_block1d4_h8_ssse3;
+#endif  // ARCH_X86_64
 filter8_1dfunction vpx_filter_block1d16_v8_avg_ssse3;
 filter8_1dfunction vpx_filter_block1d16_h8_avg_ssse3;
 filter8_1dfunction vpx_filter_block1d8_v8_avg_ssse3;
@@ -370,7 +616,7 @@ FUN_CONV_1D(avg_vert, y_step_q4, filter_y, v, src - src_stride * 3, avg_,
   out7 = _mm_unpackhi_epi64(tr2_3, tr2_3);                              \
 }
 
-static void filter_horiz_w8_ssse3(const uint8_t *src_x, ptrdiff_t src_pitch,
+static void filter_horiz_w8_ssse3(const uint8_t *src_x, int src_pitch,
                                   uint8_t *dst, const int16_t *x_filter) {
   const __m128i k_256 = _mm_set1_epi16(1 << 8);
   const __m128i f_values = _mm_load_si128((const __m128i *)x_filter);
@@ -494,17 +740,18 @@ static void scaledconvolve_horiz_w8(const uint8_t *src, ptrdiff_t src_stride,
 
 static void filter_horiz_w4_ssse3(const uint8_t *src_ptr, ptrdiff_t src_pitch,
                                   uint8_t *dst, const int16_t *filter) {
-  const __m128i k_256 = _mm_set1_epi16(1 << 8);
-  const __m128i f_values = _mm_load_si128((const __m128i *)filter);
+  const __m64 k_256 = _mm_set1_pi16(1 << 8);
+  const __m64 f_values_lo = *((const __m64 *)filter);
+  const __m64 f_values_hi = *((const __m64 *)(filter + 4));
   // pack and duplicate the filter values
-  const __m128i f1f0 = _mm_shuffle_epi8(f_values, _mm_set1_epi16(0x0200u));
-  const __m128i f3f2 = _mm_shuffle_epi8(f_values, _mm_set1_epi16(0x0604u));
-  const __m128i f5f4 = _mm_shuffle_epi8(f_values, _mm_set1_epi16(0x0a08u));
-  const __m128i f7f6 = _mm_shuffle_epi8(f_values, _mm_set1_epi16(0x0e0cu));
-  const __m128i A = _mm_loadl_epi64((const __m128i *)src_ptr);
-  const __m128i B = _mm_loadl_epi64((const __m128i *)(src_ptr + src_pitch));
-  const __m128i C = _mm_loadl_epi64((const __m128i *)(src_ptr + src_pitch * 2));
-  const __m128i D = _mm_loadl_epi64((const __m128i *)(src_ptr + src_pitch * 3));
+  const __m64 f1f0 = _mm_shuffle_pi8(f_values_lo, _mm_set1_pi16(0x0200u));
+  const __m64 f3f2 = _mm_shuffle_pi8(f_values_lo, _mm_set1_pi16(0x0604u));
+  const __m64 f5f4 = _mm_shuffle_pi8(f_values_hi, _mm_set1_pi16(0x0a08u));
+  const __m64 f7f6 = _mm_shuffle_pi8(f_values_hi, _mm_set1_pi16(0x0e0cu));
+  const __m64 A = *((const __m64 *)src_ptr);
+  const __m64 B = *((const __m64 *)(src_ptr + src_pitch));
+  const __m64 C = *((const __m64 *)(src_ptr + src_pitch * 2));
+  const __m64 D = *((const __m64 *)(src_ptr + src_pitch * 3));
   // TRANSPOSE...
   // 00 01 02 03 04 05 06 07
   // 10 11 12 13 14 15 16 17
@@ -522,57 +769,63 @@ static void filter_horiz_w4_ssse3(const uint8_t *src_ptr, ptrdiff_t src_pitch,
   // 06 16 26 36
   // 07 17 27 37
   //
-  // 00 01 10 11 02 03 12 13 04 05 14 15 06 07 16 17
-  const __m128i tr0_0 = _mm_unpacklo_epi16(A, B);
-  // 20 21 30 31 22 23 32 33 24 25 34 35 26 27 36 37
-  const __m128i tr0_1 = _mm_unpacklo_epi16(C, D);
-  // 00 01 10 11 20 21 30 31 02 03 12 13 22 23 32 33
-  const __m128i s1s0  = _mm_unpacklo_epi32(tr0_0, tr0_1);
-  // 04 05 14 15 24 25 34 35 06 07 16 17 26 27 36 37
-  const __m128i s5s4 = _mm_unpackhi_epi32(tr0_0, tr0_1);
+  // 00 01 10 11 02 03 12 13
+  const __m64 tr0_0 = _mm_unpacklo_pi16(A, B);
+  // 20 21 30 31 22 23 32 33
+  const __m64 tr0_1 = _mm_unpacklo_pi16(C, D);
+  // 04 05 14 15 06 07 16 17
+  const __m64 tr0_2 = _mm_unpackhi_pi16(A, B);
+  // 24 25 34 35 26 27 36 37
+  const __m64 tr0_3 = _mm_unpackhi_pi16(C, D);
+  // 00 01 10 11 20 21 30 31
+  const __m64 s1s0  = _mm_unpacklo_pi32(tr0_0, tr0_1);
   // 02 03 12 13 22 23 32 33
-  const __m128i s3s2 = _mm_srli_si128(s1s0, 8);
+  const __m64 s3s2 = _mm_unpackhi_pi32(tr0_0, tr0_1);
+  // 04 05 14 15 24 25 34 35
+  const __m64 s5s4 = _mm_unpacklo_pi32(tr0_2, tr0_3);
   // 06 07 16 17 26 27 36 37
-  const __m128i s7s6 = _mm_srli_si128(s5s4, 8);
+  const __m64 s7s6 = _mm_unpackhi_pi32(tr0_2, tr0_3);
   // multiply 2 adjacent elements with the filter and add the result
-  const __m128i x0 = _mm_maddubs_epi16(s1s0, f1f0);
-  const __m128i x1 = _mm_maddubs_epi16(s3s2, f3f2);
-  const __m128i x2 = _mm_maddubs_epi16(s5s4, f5f4);
-  const __m128i x3 = _mm_maddubs_epi16(s7s6, f7f6);
+  const __m64 x0 = _mm_maddubs_pi16(s1s0, f1f0);
+  const __m64 x1 = _mm_maddubs_pi16(s3s2, f3f2);
+  const __m64 x2 = _mm_maddubs_pi16(s5s4, f5f4);
+  const __m64 x3 = _mm_maddubs_pi16(s7s6, f7f6);
   // add and saturate the results together
-  const __m128i min_x2x1 = _mm_min_epi16(x2, x1);
-  const __m128i max_x2x1 = _mm_max_epi16(x2, x1);
-  __m128i temp = _mm_adds_epi16(x0, x3);
-  temp = _mm_adds_epi16(temp, min_x2x1);
-  temp = _mm_adds_epi16(temp, max_x2x1);
+  const __m64 min_x2x1 = _mm_min_pi16(x2, x1);
+  const __m64 max_x2x1 = _mm_max_pi16(x2, x1);
+  __m64 temp = _mm_adds_pi16(x0, x3);
+  temp = _mm_adds_pi16(temp, min_x2x1);
+  temp = _mm_adds_pi16(temp, max_x2x1);
   // round and shift by 7 bit each 16 bit
-  temp = _mm_mulhrs_epi16(temp, k_256);
+  temp = _mm_mulhrs_pi16(temp, k_256);
   // shrink to 8 bit each 16 bits
-  temp = _mm_packus_epi16(temp, temp);
+  temp = _mm_packs_pu16(temp, temp);
   // save only 4 bytes
-  *(int *)dst = _mm_cvtsi128_si32(temp);
+  *(int *)dst = _mm_cvtsi64_si32(temp);
 }
 
 static void transpose4x4_to_dst(const uint8_t *src, ptrdiff_t src_stride,
                                 uint8_t *dst, ptrdiff_t dst_stride) {
-  __m128i A = _mm_cvtsi32_si128(*(const int *)src);
-  __m128i B = _mm_cvtsi32_si128(*(const int *)(src + src_stride));
-  __m128i C = _mm_cvtsi32_si128(*(const int *)(src + src_stride * 2));
-  __m128i D = _mm_cvtsi32_si128(*(const int *)(src + src_stride * 3));
+  __m64 A = _mm_cvtsi32_si64(*(const int *)src);
+  __m64 B = _mm_cvtsi32_si64(*(const int *)(src + src_stride));
+  __m64 C = _mm_cvtsi32_si64(*(const int *)(src + src_stride * 2));
+  __m64 D = _mm_cvtsi32_si64(*(const int *)(src + src_stride * 3));
   // 00 10 01 11 02 12 03 13
-  const __m128i tr0_0 = _mm_unpacklo_epi8(A, B);
+  const __m64 tr0_0 = _mm_unpacklo_pi8(A, B);
   // 20 30 21 31 22 32 23 33
-  const __m128i tr0_1 = _mm_unpacklo_epi8(C, D);
-  // 00 10 20 30 01 11 21 31 02 12 22 32 03 13 23 33
-  A = _mm_unpacklo_epi16(tr0_0, tr0_1);
-  B = _mm_srli_si128(A, 4);
-  C = _mm_srli_si128(A, 8);
-  D = _mm_srli_si128(A, 12);
+  const __m64 tr0_1 = _mm_unpacklo_pi8(C, D);
+  // 00 10 20 30 01 11 21 31
+  A = _mm_unpacklo_pi16(tr0_0, tr0_1);
+  // 02 12 22 32 03 13 23 33
+  C = _mm_unpackhi_pi16(tr0_0, tr0_1);
 
-  *(int *)(dst) =  _mm_cvtsi128_si32(A);
-  *(int *)(dst + dst_stride) =  _mm_cvtsi128_si32(B);
-  *(int *)(dst + dst_stride * 2) =  _mm_cvtsi128_si32(C);
-  *(int *)(dst + dst_stride * 3) =  _mm_cvtsi128_si32(D);
+  B = _mm_unpackhi_pi32(A, A);
+  D = _mm_unpackhi_pi32(C, C);
+
+  *(int *)(dst) =  _mm_cvtsi64_si32(A);
+  *(int *)(dst + dst_stride) =  _mm_cvtsi64_si32(B);
+  *(int *)(dst + dst_stride * 2) =  _mm_cvtsi64_si32(C);
+  *(int *)(dst + dst_stride * 3) =  _mm_cvtsi64_si32(D);
 }
 
 static void scaledconvolve_horiz_w4(const uint8_t *src, ptrdiff_t src_stride,
@@ -612,42 +865,46 @@ static void scaledconvolve_horiz_w4(const uint8_t *src, ptrdiff_t src_stride,
 
 static void filter_vert_w4_ssse3(const uint8_t *src_ptr, ptrdiff_t src_pitch,
                                  uint8_t *dst, const int16_t *filter) {
-  const __m128i k_256 = _mm_set1_epi16(1 << 8);
-  const __m128i f_values = _mm_load_si128((const __m128i *)filter);
+  const __m64 k_256 = _mm_set1_pi16(1 << 8);
+  const __m64 f_values_lo = *((const __m64 *)filter);
+  const __m64 f_values_hi = *((const __m64 *)(filter + 4));
   // pack and duplicate the filter values
-  const __m128i f1f0 = _mm_shuffle_epi8(f_values, _mm_set1_epi16(0x0200u));
-  const __m128i f3f2 = _mm_shuffle_epi8(f_values, _mm_set1_epi16(0x0604u));
-  const __m128i f5f4 = _mm_shuffle_epi8(f_values, _mm_set1_epi16(0x0a08u));
-  const __m128i f7f6 = _mm_shuffle_epi8(f_values, _mm_set1_epi16(0x0e0cu));
-  const __m128i A = _mm_cvtsi32_si128(*(const int *)src_ptr);
-  const __m128i B = _mm_cvtsi32_si128(*(const int *)(src_ptr + src_pitch));
-  const __m128i C = _mm_cvtsi32_si128(*(const int *)(src_ptr + src_pitch * 2));
-  const __m128i D = _mm_cvtsi32_si128(*(const int *)(src_ptr + src_pitch * 3));
-  const __m128i E = _mm_cvtsi32_si128(*(const int *)(src_ptr + src_pitch * 4));
-  const __m128i F = _mm_cvtsi32_si128(*(const int *)(src_ptr + src_pitch * 5));
-  const __m128i G = _mm_cvtsi32_si128(*(const int *)(src_ptr + src_pitch * 6));
-  const __m128i H = _mm_cvtsi32_si128(*(const int *)(src_ptr + src_pitch * 7));
-  const __m128i s1s0 = _mm_unpacklo_epi8(A, B);
-  const __m128i s3s2 = _mm_unpacklo_epi8(C, D);
-  const __m128i s5s4 = _mm_unpacklo_epi8(E, F);
-  const __m128i s7s6 = _mm_unpacklo_epi8(G, H);
+  const __m64 f1f0 = _mm_shuffle_pi8(f_values_lo, _mm_set1_pi16(0x0200u));
+  const __m64 f3f2 = _mm_shuffle_pi8(f_values_lo, _mm_set1_pi16(0x0604u));
+  const __m64 f5f4 = _mm_shuffle_pi8(f_values_hi, _mm_set1_pi16(0x0a08u));
+  const __m64 f7f6 = _mm_shuffle_pi8(f_values_hi, _mm_set1_pi16(0x0e0cu));
+  const __m64 A = _mm_cvtsi32_si64(*(const int *)src_ptr);
+  const __m64 B = _mm_cvtsi32_si64(*(const int *)(src_ptr + src_pitch));
+  const __m64 C = _mm_cvtsi32_si64(*(const int *)(src_ptr + src_pitch * 2));
+  const __m64 D = _mm_cvtsi32_si64(*(const int *)(src_ptr + src_pitch * 3));
+  const __m64 E = _mm_cvtsi32_si64(*(const int *)(src_ptr + src_pitch * 4));
+  const __m64 F = _mm_cvtsi32_si64(*(const int *)(src_ptr + src_pitch * 5));
+  const __m64 G = _mm_cvtsi32_si64(*(const int *)(src_ptr + src_pitch * 6));
+  const __m64 H = _mm_cvtsi32_si64(*(const int *)(src_ptr + src_pitch * 7));
+  const __m64 s1s0 = _mm_unpacklo_pi8(A, B);
+  // 02 03 12 13 22 23 32 33
+  const __m64 s3s2 = _mm_unpacklo_pi8(C, D);
+  // 04 05 14 15 24 25 34 35
+  const __m64 s5s4 = _mm_unpacklo_pi8(E, F);
+  // 06 07 16 17 26 27 36 37
+  const __m64 s7s6 = _mm_unpacklo_pi8(G, H);
   // multiply 2 adjacent elements with the filter and add the result
-  const __m128i x0 = _mm_maddubs_epi16(s1s0, f1f0);
-  const __m128i x1 = _mm_maddubs_epi16(s3s2, f3f2);
-  const __m128i x2 = _mm_maddubs_epi16(s5s4, f5f4);
-  const __m128i x3 = _mm_maddubs_epi16(s7s6, f7f6);
+  const __m64 x0 = _mm_maddubs_pi16(s1s0, f1f0);
+  const __m64 x1 = _mm_maddubs_pi16(s3s2, f3f2);
+  const __m64 x2 = _mm_maddubs_pi16(s5s4, f5f4);
+  const __m64 x3 = _mm_maddubs_pi16(s7s6, f7f6);
   // add and saturate the results together
-  const __m128i min_x2x1 = _mm_min_epi16(x2, x1);
-  const __m128i max_x2x1 = _mm_max_epi16(x2, x1);
-  __m128i temp = _mm_adds_epi16(x0, x3);
-  temp = _mm_adds_epi16(temp, min_x2x1);
-  temp = _mm_adds_epi16(temp, max_x2x1);
+  const __m64 min_x2x1 = _mm_min_pi16(x2, x1);
+  const __m64 max_x2x1 = _mm_max_pi16(x2, x1);
+  __m64 temp = _mm_adds_pi16(x0, x3);
+  temp = _mm_adds_pi16(temp, min_x2x1);
+  temp = _mm_adds_pi16(temp, max_x2x1);
   // round and shift by 7 bit each 16 bit
-  temp = _mm_mulhrs_epi16(temp, k_256);
+  temp = _mm_mulhrs_pi16(temp, k_256);
   // shrink to 8 bit each 16 bits
-  temp = _mm_packus_epi16(temp, temp);
+  temp = _mm_packs_pu16(temp, temp);
   // save only 4 bytes
-  *(int *)dst = _mm_cvtsi128_si32(temp);
+  *(int *)dst = _mm_cvtsi64_si32(temp);
 }
 
 static void scaledconvolve_vert_w4(const uint8_t *src, ptrdiff_t src_stride,

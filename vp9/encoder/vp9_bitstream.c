@@ -14,7 +14,6 @@
 
 #include "vpx/vpx_encoder.h"
 #include "vpx_dsp/bitwriter_buffer.h"
-#include "vpx_dsp/vpx_dsp_common.h"
 #include "vpx_mem/vpx_mem.h"
 #include "vpx_ports/mem_ops.h"
 #include "vpx_ports/system_state.h"
@@ -123,66 +122,74 @@ static void update_switchable_interp_probs(VP9_COMMON *cm, vpx_writer *w,
 static void pack_mb_tokens(vpx_writer *w,
                            TOKENEXTRA **tp, const TOKENEXTRA *const stop,
                            vpx_bit_depth_t bit_depth) {
-  const TOKENEXTRA *p;
-  const vp9_extra_bit *const extra_bits =
+  TOKENEXTRA *p = *tp;
+
+  while (p < stop && p->token != EOSB_TOKEN) {
+    const int t = p->token;
+    const struct vp9_token *const a = &vp9_coef_encodings[t];
+    int i = 0;
+    int v = a->value;
+    int n = a->len;
 #if CONFIG_VP9_HIGHBITDEPTH
-    (bit_depth == VPX_BITS_12) ? vp9_extra_bits_high12 :
-    (bit_depth == VPX_BITS_10) ? vp9_extra_bits_high10 :
-    vp9_extra_bits;
+    const vp9_extra_bit *b;
+    if (bit_depth == VPX_BITS_12)
+      b = &vp9_extra_bits_high12[t];
+    else if (bit_depth == VPX_BITS_10)
+      b = &vp9_extra_bits_high10[t];
+    else
+      b = &vp9_extra_bits[t];
 #else
-    vp9_extra_bits;
+    const vp9_extra_bit *const b = &vp9_extra_bits[t];
     (void) bit_depth;
 #endif  // CONFIG_VP9_HIGHBITDEPTH
 
-  for (p = *tp; p < stop && p->token != EOSB_TOKEN; ++p) {
-    if (p->token == EOB_TOKEN) {
-      vpx_write(w, 0, p->context_tree[0]);
-      continue;
-    }
-    vpx_write(w, 1, p->context_tree[0]);
-    while (p->token == ZERO_TOKEN) {
-      vpx_write(w, 0, p->context_tree[1]);
-      ++p;
-      if (p == stop || p->token == EOSB_TOKEN) {
-        *tp = (TOKENEXTRA*)(uintptr_t)p + (p->token == EOSB_TOKEN);
-        return;
-      }
+    /* skip one or two nodes */
+    if (p->skip_eob_node) {
+      n -= p->skip_eob_node;
+      i = 2 * p->skip_eob_node;
     }
 
-    {
-      const int t = p->token;
-      const vpx_prob *const context_tree = p->context_tree;
-      assert(t != ZERO_TOKEN);
-      assert(t != EOB_TOKEN);
-      assert(t != EOSB_TOKEN);
-      vpx_write(w, 1, context_tree[1]);
-      if (t == ONE_TOKEN) {
-        vpx_write(w, 0, context_tree[2]);
-        vpx_write_bit(w, p->extra & 1);
-      } else {  // t >= TWO_TOKEN && t < EOB_TOKEN
-        const struct vp9_token *const a = &vp9_coef_encodings[t];
-        const int v = a->value;
-        const int n = a->len;
-        const int e = p->extra;
-        vpx_write(w, 1, context_tree[2]);
-        vp9_write_tree(w, vp9_coef_con_tree,
-                       vp9_pareto8_full[context_tree[PIVOT_NODE] - 1], v,
-                       n - UNCONSTRAINED_NODES, 0);
-        if (t >= CATEGORY1_TOKEN) {
-          const vp9_extra_bit *const b = &extra_bits[t];
-          const unsigned char *pb = b->prob;
-          int v = e >> 1;
-          int n = b->len;  // number of bits in v, assumed nonzero
-          do {
-            const int bb = (v >> --n) & 1;
-            vpx_write(w, bb, *pb++);
-          } while (n);
-        }
-        vpx_write_bit(w, e & 1);
-      }
+    // TODO(jbb): expanding this can lead to big gains.  It allows
+    // much better branch prediction and would enable us to avoid numerous
+    // lookups and compares.
+
+    // If we have a token that's in the constrained set, the coefficient tree
+    // is split into two treed writes.  The first treed write takes care of the
+    // unconstrained nodes.  The second treed write takes care of the
+    // constrained nodes.
+    if (t >= TWO_TOKEN && t < EOB_TOKEN) {
+      int len = UNCONSTRAINED_NODES - p->skip_eob_node;
+      int bits = v >> (n - len);
+      vp9_write_tree(w, vp9_coef_tree, p->context_tree, bits, len, i);
+      vp9_write_tree(w, vp9_coef_con_tree,
+                     vp9_pareto8_full[p->context_tree[PIVOT_NODE] - 1],
+                     v, n - len, 0);
+    } else {
+      vp9_write_tree(w, vp9_coef_tree, p->context_tree, v, n, i);
     }
+
+    if (b->base_val) {
+      const int e = p->extra, l = b->len;
+
+      if (l) {
+        const unsigned char *pb = b->prob;
+        int v = e >> 1;
+        int n = l;              /* number of bits in v, assumed nonzero */
+        int i = 0;
+
+        do {
+          const int bb = (v >> --n) & 1;
+          vpx_write(w, bb, pb[i >> 1]);
+          i = b->tree[i + bb];
+        } while (n);
+      }
+
+      vpx_write_bit(w, e & 1);
+    }
+    ++p;
   }
-  *tp = (TOKENEXTRA*)(uintptr_t)p + (p->token == EOSB_TOKEN);
+
+  *tp = p + (p->token == EOSB_TOKEN);
 }
 
 static void write_segment_id(vpx_writer *w, const struct segmentation *seg,
@@ -808,7 +815,7 @@ static void encode_segmentation(VP9_COMMON *cm, MACROBLOCKD *xd,
 static void encode_txfm_probs(VP9_COMMON *cm, vpx_writer *w,
                               FRAME_COUNTS *counts) {
   // Mode
-  vpx_write_literal(w, VPXMIN(cm->tx_mode, ALLOW_32X32), 2);
+  vpx_write_literal(w, MIN(cm->tx_mode, ALLOW_32X32), 2);
   if (cm->tx_mode >= ALLOW_32X32)
     vpx_write_bit(w, cm->tx_mode == TX_MODE_SELECT);
 
@@ -961,14 +968,14 @@ static size_t encode_tiles(VP9_COMP *cpi, uint8_t *data_ptr) {
   return total_size;
 }
 
-static void write_render_size(const VP9_COMMON *cm,
-                              struct vpx_write_bit_buffer *wb) {
-  const int scaling_active = cm->width != cm->render_width ||
-                             cm->height != cm->render_height;
+static void write_display_size(const VP9_COMMON *cm,
+                               struct vpx_write_bit_buffer *wb) {
+  const int scaling_active = cm->width != cm->display_width ||
+                             cm->height != cm->display_height;
   vpx_wb_write_bit(wb, scaling_active);
   if (scaling_active) {
-    vpx_wb_write_literal(wb, cm->render_width - 1, 16);
-    vpx_wb_write_literal(wb, cm->render_height - 1, 16);
+    vpx_wb_write_literal(wb, cm->display_width - 1, 16);
+    vpx_wb_write_literal(wb, cm->display_height - 1, 16);
   }
 }
 
@@ -977,7 +984,7 @@ static void write_frame_size(const VP9_COMMON *cm,
   vpx_wb_write_literal(wb, cm->width - 1, 16);
   vpx_wb_write_literal(wb, cm->height - 1, 16);
 
-  write_render_size(cm, wb);
+  write_display_size(cm, wb);
 }
 
 static void write_frame_size_with_refs(VP9_COMP *cpi,
@@ -1015,7 +1022,7 @@ static void write_frame_size_with_refs(VP9_COMP *cpi,
     vpx_wb_write_literal(wb, cm->height - 1, 16);
   }
 
-  write_render_size(cm, wb);
+  write_display_size(cm, wb);
 }
 
 static void write_sync_code(struct vpx_write_bit_buffer *wb) {
@@ -1052,8 +1059,7 @@ static void write_bitdepth_colorspace_sampling(
   }
   vpx_wb_write_literal(wb, cm->color_space, 3);
   if (cm->color_space != VPX_CS_SRGB) {
-    // 0: [16, 235] (i.e. xvYCC), 1: [0, 255]
-    vpx_wb_write_bit(wb, cm->color_range);
+    vpx_wb_write_bit(wb, 0);  // 0: [16, 235] (i.e. xvYCC), 1: [0, 255]
     if (cm->profile == PROFILE_1 || cm->profile == PROFILE_3) {
       assert(cm->subsampling_x != 1 || cm->subsampling_y != 1);
       vpx_wb_write_bit(wb, cm->subsampling_x);

@@ -31,7 +31,6 @@
 #include "vp8/common/postproc.h"
 #endif
 #include "vpx_mem/vpx_mem.h"
-#include "vp8/common/reconintra.h"
 #include "vp8/common/swapyv12buffer.h"
 #include "vp8/common/threading.h"
 #include "vpx_ports/vpx_timer.h"
@@ -423,16 +422,6 @@ static void setup_features(VP8_COMP *cpi)
 
 static void dealloc_raw_frame_buffers(VP8_COMP *cpi);
 
-void vp8_initialize_enc(void)
-{
-    static volatile int init_done = 0;
-
-    if (!init_done) {
-        vpx_dsp_rtcd();
-        vp8_init_intra_predictors();
-        init_done = 1;
-    }
-}
 
 static void dealloc_compressor_data(VP8_COMP *cpi)
 {
@@ -526,6 +515,41 @@ static void set_segment_data(VP8_COMP *cpi, signed char *feature_data, unsigned 
     memcpy(cpi->segment_feature_data, feature_data, sizeof(cpi->segment_feature_data));
 }
 
+
+static void segmentation_test_function(VP8_COMP *cpi)
+{
+    unsigned char *seg_map;
+    signed char feature_data[MB_LVL_MAX][MAX_MB_SEGMENTS];
+
+    // Create a temporary map for segmentation data.
+    CHECK_MEM_ERROR(seg_map, vpx_calloc(cpi->common.mb_rows * cpi->common.mb_cols, 1));
+
+    // Set the segmentation Map
+    set_segmentation_map(cpi, seg_map);
+
+    // Activate segmentation.
+    enable_segmentation(cpi);
+
+    // Set up the quant segment data
+    feature_data[MB_LVL_ALT_Q][0] = 0;
+    feature_data[MB_LVL_ALT_Q][1] = 4;
+    feature_data[MB_LVL_ALT_Q][2] = 0;
+    feature_data[MB_LVL_ALT_Q][3] = 0;
+    // Set up the loop segment data
+    feature_data[MB_LVL_ALT_LF][0] = 0;
+    feature_data[MB_LVL_ALT_LF][1] = 0;
+    feature_data[MB_LVL_ALT_LF][2] = 0;
+    feature_data[MB_LVL_ALT_LF][3] = 0;
+
+    // Initialise the feature data structure
+    // SEGMENT_DELTADATA    0, SEGMENT_ABSDATA      1
+    set_segment_data(cpi, &feature_data[0][0], SEGMENT_DELTADATA);
+
+    // Delete sementation map
+    vpx_free(seg_map);
+
+    seg_map = 0;
+}
 
 /* A simple function to cyclically refresh the background at a lower Q */
 static void cyclic_background_refresh(VP8_COMP *cpi, int Q, int lf_adjustment)
@@ -889,7 +913,7 @@ void vp8_set_speed_features(VP8_COMP *cpi)
     Speed = cpi->Speed;
     switch (Mode)
     {
-#if !CONFIG_REALTIME_ONLY
+#if !(CONFIG_REALTIME_ONLY)
     case 0: /* best quality mode */
         sf->first_step = 0;
         sf->max_step_search_steps = MAX_MVSEARCH_STEPS;
@@ -1929,7 +1953,7 @@ struct VP8_COMP* vp8_create_compressor(VP8_CONFIG *oxcf)
      * Currently this is tied to error resilliant mode
      */
     cpi->cyclic_refresh_mode_enabled = cpi->oxcf.error_resilient_mode;
-    cpi->cyclic_refresh_mode_max_mbs_perframe = (cpi->common.mb_rows * cpi->common.mb_cols) / 7;
+    cpi->cyclic_refresh_mode_max_mbs_perframe = (cpi->common.mb_rows * cpi->common.mb_cols) / 5;
     if (cpi->oxcf.number_of_layers == 1) {
         cpi->cyclic_refresh_mode_max_mbs_perframe =
             (cpi->common.mb_rows * cpi->common.mb_cols) / 20;
@@ -2041,7 +2065,7 @@ struct VP8_COMP* vp8_create_compressor(VP8_CONFIG *oxcf)
 
     cpi->output_pkt_list = oxcf->output_pkt_list;
 
-#if !CONFIG_REALTIME_ONLY
+#if !(CONFIG_REALTIME_ONLY)
 
     if (cpi->pass == 1)
     {
@@ -2203,7 +2227,7 @@ void vp8_remove_compressor(VP8_COMP **ptr)
 
     if (cpi && (cpi->common.current_video_frame > 0))
     {
-#if !CONFIG_REALTIME_ONLY
+#if !(CONFIG_REALTIME_ONLY)
 
         if (cpi->pass == 2)
         {
@@ -2994,7 +3018,6 @@ static void update_rd_ref_frame_probs(VP8_COMP *cpi)
 }
 
 
-#if !CONFIG_REALTIME_ONLY
 /* 1 = key, 0 = inter */
 static int decide_key_frame(VP8_COMP *cpi)
 {
@@ -3062,6 +3085,7 @@ static int decide_key_frame(VP8_COMP *cpi)
 
 }
 
+#if !(CONFIG_REALTIME_ONLY)
 static void Pass1Encode(VP8_COMP *cpi, unsigned long *size, unsigned char *dest, unsigned int *frame_flags)
 {
     (void) size;
@@ -3107,7 +3131,6 @@ void write_cx_frame_to_file(YV12_BUFFER_CONFIG *frame, int this_frame)
 #endif
 /* return of 0 means drop frame */
 
-#if !CONFIG_REALTIME_ONLY
 /* Function to test for conditions that indeicate we should loop
  * back and recode a frame.
  */
@@ -3157,7 +3180,6 @@ static int recode_loop_test( VP8_COMP *cpi,
 
     return force_recode;
 }
-#endif  // !CONFIG_REALTIME_ONLY
 
 static void update_reference_frames(VP8_COMP *cpi)
 {
@@ -3579,7 +3601,7 @@ static void encode_frame_to_data_rate
     VP8_COMMON *cm = &cpi->common;
     int active_worst_qchanged = 0;
 
-#if !CONFIG_REALTIME_ONLY
+#if !(CONFIG_REALTIME_ONLY)
     int q_low;
     int q_high;
     int zbin_oq_high;
@@ -3618,7 +3640,7 @@ static void encode_frame_to_data_rate
     /* For an alt ref frame in 2 pass we skip the call to the second pass
      * function that sets the target bandwidth
      */
-#if !CONFIG_REALTIME_ONLY
+#if !(CONFIG_REALTIME_ONLY)
 
     if (cpi->pass == 2)
     {
@@ -4127,7 +4149,7 @@ static void encode_frame_to_data_rate
     /* Determine initial Q to try */
     Q = vp8_regulate_q(cpi, cpi->this_frame_target);
 
-#if !CONFIG_REALTIME_ONLY
+#if !(CONFIG_REALTIME_ONLY)
 
     /* Set highest allowed value for Zbin over quant */
     if (cm->frame_type == KEY_FRAME)
@@ -4157,7 +4179,7 @@ static void encode_frame_to_data_rate
 
     vp8_compute_frame_size_bounds(cpi, &frame_under_shoot_limit, &frame_over_shoot_limit);
 
-#if !CONFIG_REALTIME_ONLY
+#if !(CONFIG_REALTIME_ONLY)
     /* Limit Q range for the adaptive loop. */
     bottom_index = cpi->active_best_quality;
     top_index    = cpi->active_worst_quality;
@@ -4388,7 +4410,7 @@ static void encode_frame_to_data_rate
         if (cpi->pass != 2 && cpi->oxcf.auto_key && cm->frame_type != KEY_FRAME
             && cpi->compressor_speed != 2)
         {
-#if !CONFIG_REALTIME_ONLY
+#if !(CONFIG_REALTIME_ONLY)
             if (decide_key_frame(cpi))
             {
                 /* Reset all our sizing numbers and recode */
@@ -4444,9 +4466,9 @@ static void encode_frame_to_data_rate
                 /* Assume 1 qstep = about 4% on frame size. */
                 over_size_percent = (int)(over_size_percent * 0.96);
             }
-#if !CONFIG_REALTIME_ONLY
+#if !(CONFIG_REALTIME_ONLY)
             top_index = cpi->active_worst_quality;
-#endif  // !CONFIG_REALTIME_ONLY
+#endif
             /* If we have updated the active max Q do not call
              * vp8_update_rate_correction_factors() this loop.
              */
@@ -4455,7 +4477,7 @@ static void encode_frame_to_data_rate
         else
             active_worst_qchanged = 0;
 
-#if !CONFIG_REALTIME_ONLY
+#if !(CONFIG_REALTIME_ONLY)
         /* Special case handling for forced key frames */
         if ( (cm->frame_type == KEY_FRAME) && cpi->this_key_frame_forced )
         {
@@ -5193,7 +5215,7 @@ static void encode_frame_to_data_rate
 
 
 }
-#if !CONFIG_REALTIME_ONLY
+#if !(CONFIG_REALTIME_ONLY)
 static void Pass2Encode(VP8_COMP *cpi, unsigned long *size, unsigned char *dest, unsigned char * dest_end, unsigned int *frame_flags)
 {
 
@@ -5277,7 +5299,7 @@ int vp8_get_compressed_data(VP8_COMP *cpi, unsigned int *frame_flags, unsigned l
 
     cpi->source = NULL;
 
-#if !CONFIG_REALTIME_ONLY
+#if !(CONFIG_REALTIME_ONLY)
     /* Should we code an alternate reference frame */
     if (cpi->oxcf.error_resilient_mode == 0 &&
         cpi->oxcf.play_alternate &&
@@ -5345,7 +5367,7 @@ int vp8_get_compressed_data(VP8_COMP *cpi, unsigned int *frame_flags, unsigned l
     else
     {
         *size = 0;
-#if !CONFIG_REALTIME_ONLY
+#if !(CONFIG_REALTIME_ONLY)
 
         if (flush && cpi->pass == 1 && !cpi->twopass.first_pass_done)
         {
@@ -5538,7 +5560,7 @@ int vp8_get_compressed_data(VP8_COMP *cpi, unsigned int *frame_flags, unsigned l
 
         assert(i < NUM_YV12_BUFFERS );
     }
-#if !CONFIG_REALTIME_ONLY
+#if !(CONFIG_REALTIME_ONLY)
 
     if (cpi->pass == 1)
     {

@@ -57,29 +57,6 @@ typedef enum {
   REFERENCE_MODES       = 3,
 } REFERENCE_MODE;
 
-typedef enum {
-  RESET_FRAME_CONTEXT_NONE = 0,
-  RESET_FRAME_CONTEXT_CURRENT = 1,
-  RESET_FRAME_CONTEXT_ALL = 2,
-} RESET_FRAME_CONTEXT_MODE;
-
-typedef enum {
-  /**
-   * Don't update frame context
-   */
-  REFRESH_FRAME_CONTEXT_OFF,
-  /**
-   * Update frame context to values resulting from forward probability
-   * updates signaled in the frame header
-   */
-  REFRESH_FRAME_CONTEXT_FORWARD,
-  /**
-   * Update frame context to values resulting from backward probability
-   * updates based on entropy/counts in the decoded frame
-   */
-  REFRESH_FRAME_CONTEXT_BACKWARD,
-} REFRESH_FRAME_CONTEXT_MODE;
-
 typedef struct {
   int_mv mv[2];
   MV_REFERENCE_FRAME ref_frame[2];
@@ -129,11 +106,10 @@ typedef struct BufferPool {
 typedef struct VP10Common {
   struct vpx_internal_error_info  error;
   vpx_color_space_t color_space;
-  int color_range;
   int width;
   int height;
-  int render_width;
-  int render_height;
+  int display_width;
+  int display_height;
   int last_width;
   int last_height;
 
@@ -185,8 +161,10 @@ typedef struct VP10Common {
 
   int allow_high_precision_mv;
 
-  // Flag signaling which frame contexts should be reset to default values.
-  RESET_FRAME_CONTEXT_MODE reset_frame_context;
+  // Flag signaling that the frame context should be reset to default values.
+  // 0 or 1 implies don't reset, 2 reset just the context specified in the
+  // frame header, 3 reset all contexts.
+  int reset_frame_context;
 
   // MBs, mb_rows/cols is in 16-pixel units; mi_rows/cols is in
   // MODE_INFO (8-pixel) units.
@@ -244,18 +222,15 @@ typedef struct VP10Common {
 
   loop_filter_info_n lf_info;
 
-  // Flag signaling how frame contexts should be updated at the end of
-  // a frame decode
-  REFRESH_FRAME_CONTEXT_MODE refresh_frame_context;
+  int refresh_frame_context;    /* Two state 0 = NO, 1 = YES */
 
   int ref_frame_sign_bias[MAX_REF_FRAMES];    /* Two state 0, 1 */
 
   struct loopfilter lf;
   struct segmentation seg;
-#if !CONFIG_MISC_FIXES
-  struct segmentation_probs segp;
-#endif
 
+  // TODO(hkuang): Remove this as it is the same as frame_parallel_decode
+  // in pbi.
   int frame_parallel_decode;  // frame-based threading.
 
   // Context probabilities for reference frame prediction
@@ -280,9 +255,9 @@ typedef struct VP10Common {
 #endif
 
   int error_resilient_mode;
+  int frame_parallel_decoding_mode;
 
   int log2_tile_cols, log2_tile_rows;
-  int tile_sz_mag;
   int byte_alignment;
   int skip_loop_filter;
 
@@ -300,11 +275,6 @@ typedef struct VP10Common {
   PARTITION_CONTEXT *above_seg_context;
   ENTROPY_CONTEXT *above_context;
   int above_context_alloc_cols;
-
-  // scratch memory for intraonly/keyframe forward updates from default tables
-  // - this is intentionally not placed in FRAME_CONTEXT since it's reset upon
-  // each keyframe and not used afterwards
-  vpx_prob kf_y_prob[INTRA_MODES][INTRA_MODES][INTRA_MODES - 1];
 } VP10_COMMON;
 
 // TODO(hkuang): Don't need to lock the whole pool after implementing atomic
@@ -377,6 +347,14 @@ static INLINE int frame_is_intra_only(const VP10_COMMON *const cm) {
   return cm->frame_type == KEY_FRAME || cm->intra_only;
 }
 
+static INLINE void set_partition_probs(const VP10_COMMON *const cm,
+                                       MACROBLOCKD *const xd) {
+  xd->partition_probs =
+      frame_is_intra_only(cm) ?
+          &vp10_kf_partition_probs[0] :
+          (const vpx_prob (*)[PARTITION_TYPES - 1])cm->fc->partition_prob;
+}
+
 static INLINE void vp10_init_macroblockd(VP10_COMMON *cm, MACROBLOCKD *xd,
                                         tran_low_t *dqcoeff) {
   int i;
@@ -392,11 +370,19 @@ static INLINE void vp10_init_macroblockd(VP10_COMMON *cm, MACROBLOCKD *xd,
       memcpy(xd->plane[i].seg_dequant, cm->uv_dequant, sizeof(cm->uv_dequant));
     }
     xd->fc = cm->fc;
+    xd->frame_parallel_decoding_mode = cm->frame_parallel_decoding_mode;
   }
 
   xd->above_seg_context = cm->above_seg_context;
   xd->mi_stride = cm->mi_stride;
   xd->error_info = &cm->error;
+
+  set_partition_probs(cm, xd);
+}
+
+static INLINE const vpx_prob* get_partition_probs(const MACROBLOCKD *xd,
+                                                  int ctx) {
+  return xd->partition_probs[ctx];
 }
 
 static INLINE void set_skip_context(MACROBLOCKD *xd, int mi_row, int mi_col) {
@@ -444,16 +430,6 @@ static INLINE void set_mi_row_col(MACROBLOCKD *xd, const TileInfo *const tile,
     xd->left_mi = NULL;
     xd->left_mbmi = NULL;
   }
-}
-
-static INLINE const vpx_prob *get_y_mode_probs(const VP10_COMMON *cm,
-                                               const MODE_INFO *mi,
-                                               const MODE_INFO *above_mi,
-                                               const MODE_INFO *left_mi,
-                                               int block) {
-  const PREDICTION_MODE above = vp10_above_block_mode(mi, above_mi, block);
-  const PREDICTION_MODE left = vp10_left_block_mode(mi, left_mi, block);
-  return cm->kf_y_prob[above][left];
 }
 
 static INLINE void update_partition_context(MACROBLOCKD *xd,

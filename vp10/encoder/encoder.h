@@ -33,6 +33,7 @@
 #include "vp10/encoder/ratectrl.h"
 #include "vp10/encoder/rd.h"
 #include "vp10/encoder/speed_features.h"
+#include "vp10/encoder/svc_layercontext.h"
 #include "vp10/encoder/tokenize.h"
 
 #if CONFIG_VP9_TEMPORAL_DENOISING
@@ -55,14 +56,12 @@ typedef struct {
   int nmvcosts[2][MV_VALS];
   int nmvcosts_hp[2][MV_VALS];
 
-#if !CONFIG_MISC_FIXES
   vpx_prob segment_pred_probs[PREDICTION_PROBS];
-#endif
 
   unsigned char *last_frame_seg_map_copy;
 
   // 0 = Intra, Last, GF, ARF
-  signed char last_ref_lf_deltas[MAX_REF_FRAMES];
+  signed char last_ref_lf_deltas[MAX_REF_LF_DELTAS];
   // 0 = ZERO_MV, MV
   signed char last_mode_lf_deltas[MAX_MODE_LF_DELTAS];
 
@@ -117,7 +116,7 @@ typedef enum {
 } AQ_MODE;
 
 typedef enum {
-  RESIZE_NONE = 0,    // No frame resizing allowed.
+  RESIZE_NONE = 0,    // No frame resizing allowed (except for SVC).
   RESIZE_FIXED = 1,   // All frames are coded at the specified dimension.
   RESIZE_DYNAMIC = 2  // Coded size of each frame is determined by the codec.
 } RESIZE_TYPE;
@@ -190,6 +189,16 @@ typedef struct VP10EncoderConfig {
   // END DATARATE CONTROL OPTIONS
   // ----------------------------------------------------------------
 
+  // Spatial and temporal scalability.
+  int ss_number_layers;  // Number of spatial layers.
+  int ts_number_layers;  // Number of temporal layers.
+  // Bitrate allocation for spatial layers.
+  int layer_target_bitrate[VPX_MAX_LAYERS];
+  int ss_target_bitrate[VPX_SS_MAX_LAYERS];
+  int ss_enable_auto_arf[VPX_SS_MAX_LAYERS];
+  // Bitrate allocation (CBR mode) and framerate factor, for temporal layers.
+  int ts_rate_decimator[VPX_TS_MAX_LAYERS];
+
   int enable_auto_arf;
 
   int encode_breakout;  // early breakout : for video conf recommend 800
@@ -230,9 +239,7 @@ typedef struct VP10EncoderConfig {
   int use_highbitdepth;
 #endif
   vpx_color_space_t color_space;
-  int color_range;
-  int render_width;
-  int render_height;
+  VP9E_TEMPORAL_LAYERING_MODE temporal_layering_mode;
 } VP10EncoderConfig;
 
 static INLINE int is_lossless_requested(const VP10EncoderConfig *cfg) {
@@ -250,8 +257,6 @@ typedef struct RD_COUNTS {
   vp10_coeff_count coef_counts[TX_SIZES][PLANE_TYPES];
   int64_t comp_pred_diff[REFERENCE_MODES];
   int64_t filter_diff[SWITCHABLE_FILTER_CONTEXTS];
-  int m_search_count;
-  int ex_search_count;
 } RD_COUNTS;
 
 typedef struct ThreadData {
@@ -446,6 +451,10 @@ typedef struct VP10_COMP {
                     // number of MBs in the current frame when the frame is
                     // scaled.
 
+  int use_svc;
+
+  SVC svc;
+
   // Store frame variance info in SOURCE_VAR_BASED_PARTITION search type.
   diff *source_diff_var;
   // The threshold used in SOURCE_VAR_BASED_PARTITION search type.
@@ -458,7 +467,7 @@ typedef struct VP10_COMP {
 
   int mbmode_cost[INTRA_MODES];
   unsigned int inter_mode_cost[INTER_MODE_CONTEXTS][INTER_MODES];
-  int intra_uv_mode_cost[INTRA_MODES][INTRA_MODES];
+  int intra_uv_mode_cost[FRAME_TYPES][INTRA_MODES];
   int y_mode_costs[INTRA_MODES][INTRA_MODES][INTRA_MODES];
   int switchable_interp_costs[SWITCHABLE_FILTER_CONTEXTS][SWITCHABLE_FILTERS];
   int partition_cost[PARTITION_CONTEXTS][PARTITION_TYPES];
@@ -537,6 +546,8 @@ int vp10_set_internal_size(VP10_COMP *cpi,
 int vp10_set_size_literal(VP10_COMP *cpi, unsigned int width,
                          unsigned int height);
 
+void vp10_set_svc(VP10_COMP *cpi, int use_svc);
+
 int vp10_get_quantizer(struct VP10_COMP *cpi);
 
 static INLINE int frame_is_kf_gf_arf(const VP10_COMP *cpi) {
@@ -576,8 +587,8 @@ static INLINE int get_token_alloc(int mb_rows, int mb_cols) {
   // 32x32 transform crossing a boundary at a multiple of 16.
   // mb_rows, cols are in units of 16 pixels. We assume 3 planes all at full
   // resolution. We assume up to 1 token per pixel, and then allow
-  // a head room of 1 EOSB token per 8x8 block per plane.
-  return mb_rows * mb_cols * (16 * 16 + 4) * 3;
+  // a head room of 4.
+  return mb_rows * mb_cols * (16 * 16 * 3 + 4);
 }
 
 // Get the allocated token size for a tile. It does the same calculation as in
@@ -613,9 +624,19 @@ YV12_BUFFER_CONFIG *vp10_scale_if_required(VP10_COMMON *cm,
 
 void vp10_apply_encoding_flags(VP10_COMP *cpi, vpx_enc_frame_flags_t flags);
 
+static INLINE int is_two_pass_svc(const struct VP10_COMP *const cpi) {
+  return cpi->use_svc && cpi->oxcf.pass != 0;
+}
+
+static INLINE int is_one_pass_cbr_svc(const struct VP10_COMP *const cpi) {
+  return (cpi->use_svc && cpi->oxcf.pass == 0);
+}
+
 static INLINE int is_altref_enabled(const VP10_COMP *const cpi) {
   return cpi->oxcf.mode != REALTIME && cpi->oxcf.lag_in_frames > 0 &&
-         cpi->oxcf.enable_auto_arf;
+         (cpi->oxcf.enable_auto_arf &&
+          (!is_two_pass_svc(cpi) ||
+           cpi->oxcf.ss_enable_auto_arf[cpi->svc.spatial_layer_id]));
 }
 
 static INLINE void set_ref_ptrs(VP10_COMMON *cm, MACROBLOCKD *xd,

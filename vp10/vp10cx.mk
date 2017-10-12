@@ -17,6 +17,7 @@ VP10_CX_SRCS_REMOVE-no  += $(VP10_COMMON_SRCS_REMOVE-no)
 
 VP10_CX_SRCS-yes += vp10_cx_iface.c
 
+VP10_CX_SRCS-yes += encoder/avg.c
 VP10_CX_SRCS-yes += encoder/bitstream.c
 VP10_CX_SRCS-yes += encoder/context_tree.c
 VP10_CX_SRCS-yes += encoder/context_tree.h
@@ -47,6 +48,8 @@ VP10_CX_SRCS-yes += encoder/quantize.h
 VP10_CX_SRCS-yes += encoder/ratectrl.h
 VP10_CX_SRCS-yes += encoder/rd.h
 VP10_CX_SRCS-yes += encoder/rdopt.h
+VP10_CX_SRCS-yes += encoder/pickmode.h
+VP10_CX_SRCS-yes += encoder/svc_layercontext.h
 VP10_CX_SRCS-yes += encoder/tokenize.h
 VP10_CX_SRCS-yes += encoder/treewriter.h
 VP10_CX_SRCS-yes += encoder/mcomp.c
@@ -57,12 +60,14 @@ VP10_CX_SRCS-yes += encoder/quantize.c
 VP10_CX_SRCS-yes += encoder/ratectrl.c
 VP10_CX_SRCS-yes += encoder/rd.c
 VP10_CX_SRCS-yes += encoder/rdopt.c
+VP10_CX_SRCS-yes += encoder/pickmode.c
 VP10_CX_SRCS-yes += encoder/segmentation.c
 VP10_CX_SRCS-yes += encoder/segmentation.h
 VP10_CX_SRCS-yes += encoder/speed_features.c
 VP10_CX_SRCS-yes += encoder/speed_features.h
 VP10_CX_SRCS-yes += encoder/subexp.c
 VP10_CX_SRCS-yes += encoder/subexp.h
+VP10_CX_SRCS-yes += encoder/svc_layercontext.c
 VP10_CX_SRCS-yes += encoder/resize.c
 VP10_CX_SRCS-yes += encoder/resize.h
 VP10_CX_SRCS-$(CONFIG_INTERNAL_STATS) += encoder/blockiness.c
@@ -86,6 +91,7 @@ VP10_CX_SRCS-yes += encoder/temporal_filter.h
 VP10_CX_SRCS-yes += encoder/mbgraph.c
 VP10_CX_SRCS-yes += encoder/mbgraph.h
 
+VP10_CX_SRCS-$(HAVE_SSE2) += encoder/x86/avg_intrin_sse2.c
 VP10_CX_SRCS-$(HAVE_SSE2) += encoder/x86/temporal_filter_apply_sse2.asm
 VP10_CX_SRCS-$(HAVE_SSE2) += encoder/x86/quantize_sse2.c
 ifeq ($(CONFIG_VP9_HIGHBITDEPTH),yes)
@@ -100,6 +106,7 @@ endif
 ifeq ($(ARCH_X86_64),yes)
 ifeq ($(CONFIG_USE_X86INC),yes)
 VP10_CX_SRCS-$(HAVE_SSSE3) += encoder/x86/quantize_ssse3_x86_64.asm
+VP10_CX_SRCS-$(HAVE_SSSE3) += encoder/x86/dct_ssse3_x86_64.asm
 endif
 endif
 
@@ -116,8 +123,10 @@ ifneq ($(CONFIG_VP9_HIGHBITDEPTH),yes)
 VP10_CX_SRCS-$(HAVE_NEON) += encoder/arm/neon/dct_neon.c
 VP10_CX_SRCS-$(HAVE_NEON) += encoder/arm/neon/error_neon.c
 endif
+VP10_CX_SRCS-$(HAVE_NEON) += encoder/arm/neon/avg_neon.c
 VP10_CX_SRCS-$(HAVE_NEON) += encoder/arm/neon/quantize_neon.c
 
+VP10_CX_SRCS-$(HAVE_MSA) += encoder/mips/msa/avg_msa.c
 VP10_CX_SRCS-$(HAVE_MSA) += encoder/mips/msa/error_msa.c
 VP10_CX_SRCS-$(HAVE_MSA) += encoder/mips/msa/fdct4x4_msa.c
 VP10_CX_SRCS-$(HAVE_MSA) += encoder/mips/msa/fdct8x8_msa.c

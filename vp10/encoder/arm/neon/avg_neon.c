@@ -11,7 +11,7 @@
 #include <arm_neon.h>
 #include <assert.h>
 
-#include "./vpx_dsp_rtcd.h"
+#include "./vp10_rtcd.h"
 #include "./vpx_config.h"
 
 #include "vpx/vpx_integer.h"
@@ -24,19 +24,7 @@ static INLINE unsigned int horizontal_add_u16x8(const uint16x8_t v_16x8) {
   return vget_lane_u32(c, 0);
 }
 
-unsigned int vpx_avg_4x4_neon(const uint8_t *s, int p) {
-  uint16x8_t v_sum;
-  uint32x2_t v_s0 = vdup_n_u32(0);
-  uint32x2_t v_s1 = vdup_n_u32(0);
-  v_s0 = vld1_lane_u32((const uint32_t *)s, v_s0, 0);
-  v_s0 = vld1_lane_u32((const uint32_t *)(s + p), v_s0, 1);
-  v_s1 = vld1_lane_u32((const uint32_t *)(s + 2 * p), v_s1, 0);
-  v_s1 = vld1_lane_u32((const uint32_t *)(s + 3 * p), v_s1, 1);
-  v_sum = vaddl_u8(vreinterpret_u8_u32(v_s0), vreinterpret_u8_u32(v_s1));
-  return (horizontal_add_u16x8(v_sum) + 8) >> 4;
-}
-
-unsigned int vpx_avg_8x8_neon(const uint8_t *s, int p) {
+unsigned int vp10_avg_8x8_neon(const uint8_t *s, int p) {
   uint8x8_t v_s0 = vld1_u8(s);
   const uint8x8_t v_s1 = vld1_u8(s + p);
   uint16x8_t v_sum = vaddl_u8(v_s0, v_s1);
@@ -62,34 +50,7 @@ unsigned int vpx_avg_8x8_neon(const uint8_t *s, int p) {
   return (horizontal_add_u16x8(v_sum) + 32) >> 6;
 }
 
-// coeff: 16 bits, dynamic range [-32640, 32640].
-// length: value range {16, 64, 256, 1024}.
-int vpx_satd_neon(const int16_t *coeff, int length) {
-  const int16x4_t zero = vdup_n_s16(0);
-  int32x4_t accum = vdupq_n_s32(0);
-
-  do {
-    const int16x8_t src0 = vld1q_s16(coeff);
-    const int16x8_t src8 = vld1q_s16(coeff + 8);
-    accum = vabal_s16(accum, vget_low_s16(src0), zero);
-    accum = vabal_s16(accum, vget_high_s16(src0), zero);
-    accum = vabal_s16(accum, vget_low_s16(src8), zero);
-    accum = vabal_s16(accum, vget_high_s16(src8), zero);
-    length -= 16;
-    coeff += 16;
-  } while (length != 0);
-
-  {
-    // satd: 26 bits, dynamic range [-32640 * 1024, 32640 * 1024]
-    const int64x2_t s0 = vpaddlq_s32(accum);  // cascading summation of 'accum'.
-    const int32x2_t s1 = vadd_s32(vreinterpret_s32_s64(vget_low_s64(s0)),
-                                  vreinterpret_s32_s64(vget_high_s64(s0)));
-    const int satd = vget_lane_s32(s1, 0);
-    return satd;
-  }
-}
-
-void vpx_int_pro_row_neon(int16_t hbuf[16], uint8_t const *ref,
+void vp10_int_pro_row_neon(int16_t hbuf[16], uint8_t const *ref,
                           const int ref_stride, const int height) {
   int i;
   uint16x8_t vec_sum_lo = vdupq_n_u16(0);
@@ -142,7 +103,7 @@ void vpx_int_pro_row_neon(int16_t hbuf[16], uint8_t const *ref,
   vst1q_s16(hbuf, vreinterpretq_s16_u16(vec_sum_hi));
 }
 
-int16_t vpx_int_pro_col_neon(uint8_t const *ref, const int width) {
+int16_t vp10_int_pro_col_neon(uint8_t const *ref, const int width) {
   int i;
   uint16x8_t vec_sum = vdupq_n_u16(0);
 
@@ -158,7 +119,7 @@ int16_t vpx_int_pro_col_neon(uint8_t const *ref, const int width) {
 
 // ref, src = [0, 510] - max diff = 16-bits
 // bwl = {2, 3, 4}, width = {16, 32, 64}
-int vpx_vector_var_neon(int16_t const *ref, int16_t const *src, const int bwl) {
+int vp10_vector_var_neon(int16_t const *ref, int16_t const *src, const int bwl) {
   int width = 4 << bwl;
   int32x4_t sse = vdupq_n_s32(0);
   int16x8_t total = vdupq_n_s16(0);

@@ -562,7 +562,7 @@ static int main_loop(int argc, const char **argv_) {
   int                     opt_i420 = 0;
   vpx_codec_dec_cfg_t     cfg = {0, 0, 0};
 #if CONFIG_VP9_HIGHBITDEPTH
-  unsigned int            output_bit_depth = 0;
+  int                     output_bit_depth = 0;
 #endif
 #if CONFIG_VP8_DECODER
   vp8_postproc_cfg_t      vp8_pp_cfg = {0};
@@ -618,6 +618,9 @@ static int main_loop(int argc, const char **argv_) {
       use_y4m = 0;
       flipuv = 1;
       opt_yv12 = 1;
+#if CONFIG_VP9_HIGHBITDEPTH
+      output_bit_depth = 8;  // For yv12 8-bit depth output is assumed
+#endif
     } else if (arg_match(&arg, &use_i420, argi)) {
       use_y4m = 0;
       flipuv = 0;
@@ -953,22 +956,22 @@ static int main_loop(int argc, const char **argv_) {
           // these is set to 0, use the display size set in the first frame
           // header. If that is unavailable, use the raw decoded size of the
           // first decoded frame.
-          int render_width = vpx_input_ctx.width;
-          int render_height = vpx_input_ctx.height;
-          if (!render_width || !render_height) {
-            int render_size[2];
+          int display_width = vpx_input_ctx.width;
+          int display_height = vpx_input_ctx.height;
+          if (!display_width || !display_height) {
+            int display_size[2];
             if (vpx_codec_control(&decoder, VP9D_GET_DISPLAY_SIZE,
-                                  render_size)) {
+                                  display_size)) {
               // As last resort use size of first frame as display size.
-              render_width = img->d_w;
-              render_height = img->d_h;
+              display_width = img->d_w;
+              display_height = img->d_h;
             } else {
-              render_width = render_size[0];
-              render_height = render_size[1];
+              display_width = display_size[0];
+              display_height = display_size[1];
             }
           }
-          scaled_img = vpx_img_alloc(NULL, img->fmt, render_width,
-                                     render_height, 16);
+          scaled_img = vpx_img_alloc(NULL, img->fmt, display_width,
+                                     display_height, 16);
           scaled_img->bit_depth = img->bit_depth;
         }
 
@@ -987,11 +990,11 @@ static int main_loop(int argc, const char **argv_) {
       }
 #if CONFIG_VP9_HIGHBITDEPTH
       // Default to codec bit depth if output bit depth not set
-      if (!output_bit_depth && single_file && !do_md5) {
+      if (!output_bit_depth) {
         output_bit_depth = img->bit_depth;
       }
       // Shift up or down if necessary
-      if (output_bit_depth != 0 && output_bit_depth != img->bit_depth) {
+      if (output_bit_depth != img->bit_depth) {
         const vpx_img_fmt_t shifted_fmt = output_bit_depth == 8 ?
             img->fmt ^ (img->fmt & VPX_IMG_FMT_HIGHBITDEPTH) :
             img->fmt | VPX_IMG_FMT_HIGHBITDEPTH;

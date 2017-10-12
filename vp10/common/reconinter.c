@@ -128,53 +128,6 @@ void build_inter_predictors(MACROBLOCKD *xd, int plane, int block,
   }
 }
 
-void vp10_build_inter_predictor_sub8x8(MACROBLOCKD *xd, int plane,
-                                       int i, int ir, int ic,
-                                       int mi_row, int mi_col) {
-  struct macroblockd_plane *const pd = &xd->plane[plane];
-  MODE_INFO *const mi = xd->mi[0];
-  const BLOCK_SIZE plane_bsize = get_plane_block_size(mi->mbmi.sb_type, pd);
-  const int width = 4 * num_4x4_blocks_wide_lookup[plane_bsize];
-  const int height = 4 * num_4x4_blocks_high_lookup[plane_bsize];
-
-  uint8_t *const dst = &pd->dst.buf[(ir * pd->dst.stride + ic) << 2];
-  int ref;
-  const int is_compound = has_second_ref(&mi->mbmi);
-  const InterpKernel *kernel = vp10_filter_kernels[mi->mbmi.interp_filter];
-
-  for (ref = 0; ref < 1 + is_compound; ++ref) {
-    const uint8_t *pre =
-        &pd->pre[ref].buf[(ir * pd->pre[ref].stride + ic) << 2];
-#if CONFIG_VP9_HIGHBITDEPTH
-  if (xd->cur_buf->flags & YV12_FLAG_HIGHBITDEPTH) {
-    vp10_highbd_build_inter_predictor(pre, pd->pre[ref].stride,
-                                      dst, pd->dst.stride,
-                                      &mi->bmi[i].as_mv[ref].as_mv,
-                                      &xd->block_refs[ref]->sf, width, height,
-                                      ref, kernel, MV_PRECISION_Q3,
-                                      mi_col * MI_SIZE + 4 * ic,
-                                      mi_row * MI_SIZE + 4 * ir, xd->bd);
-  } else {
-    vp10_build_inter_predictor(pre, pd->pre[ref].stride,
-                               dst, pd->dst.stride,
-                               &mi->bmi[i].as_mv[ref].as_mv,
-                               &xd->block_refs[ref]->sf, width, height, ref,
-                               kernel, MV_PRECISION_Q3,
-                               mi_col * MI_SIZE + 4 * ic,
-                               mi_row * MI_SIZE + 4 * ir);
-  }
-#else
-    vp10_build_inter_predictor(pre, pd->pre[ref].stride,
-                               dst, pd->dst.stride,
-                               &mi->bmi[i].as_mv[ref].as_mv,
-                               &xd->block_refs[ref]->sf, width, height, ref,
-                               kernel, MV_PRECISION_Q3,
-                               mi_col * MI_SIZE + 4 * ic,
-                               mi_row * MI_SIZE + 4 * ir);
-#endif  // CONFIG_VP9_HIGHBITDEPTH
-  }
-}
-
 static void build_inter_predictors_for_planes(MACROBLOCKD *xd, BLOCK_SIZE bsize,
                                               int mi_row, int mi_col,
                                               int plane_from, int plane_to) {
@@ -182,26 +135,20 @@ static void build_inter_predictors_for_planes(MACROBLOCKD *xd, BLOCK_SIZE bsize,
   const int mi_x = mi_col * MI_SIZE;
   const int mi_y = mi_row * MI_SIZE;
   for (plane = plane_from; plane <= plane_to; ++plane) {
-    const struct macroblockd_plane *pd = &xd->plane[plane];
-    const int bw = 4 * num_4x4_blocks_wide_lookup[bsize] >> pd->subsampling_x;
-    const int bh = 4 * num_4x4_blocks_high_lookup[bsize] >> pd->subsampling_y;
+    const BLOCK_SIZE plane_bsize = get_plane_block_size(bsize,
+                                                        &xd->plane[plane]);
+    const int num_4x4_w = num_4x4_blocks_wide_lookup[plane_bsize];
+    const int num_4x4_h = num_4x4_blocks_high_lookup[plane_bsize];
+    const int bw = 4 * num_4x4_w;
+    const int bh = 4 * num_4x4_h;
 
     if (xd->mi[0]->mbmi.sb_type < BLOCK_8X8) {
-      const PARTITION_TYPE bp = bsize - xd->mi[0]->mbmi.sb_type;
-      const int have_vsplit = bp != PARTITION_HORZ;
-      const int have_hsplit = bp != PARTITION_VERT;
-      const int num_4x4_w = 2 >> ((!have_vsplit) | pd->subsampling_x);
-      const int num_4x4_h = 2 >> ((!have_hsplit) | pd->subsampling_y);
-      const int pw = 8 >> (have_vsplit | pd->subsampling_x);
-      const int ph = 8 >> (have_hsplit | pd->subsampling_y);
-      int x, y;
-      assert(bp != PARTITION_NONE && bp < PARTITION_TYPES);
+      int i = 0, x, y;
       assert(bsize == BLOCK_8X8);
-      assert(pw * num_4x4_w == bw && ph * num_4x4_h == bh);
       for (y = 0; y < num_4x4_h; ++y)
         for (x = 0; x < num_4x4_w; ++x)
-           build_inter_predictors(xd, plane, y * 2 + x, bw, bh,
-                                  4 * x, 4 * y, pw, ph, mi_x, mi_y);
+           build_inter_predictors(xd, plane, i++, bw, bh,
+                                  4 * x, 4 * y, 4, 4, mi_x, mi_y);
     } else {
       build_inter_predictors(xd, plane, 0, bw, bh,
                              0, 0, bw, bh, mi_x, mi_y);

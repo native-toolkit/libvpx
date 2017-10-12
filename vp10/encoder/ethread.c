@@ -11,7 +11,6 @@
 #include "vp10/encoder/encodeframe.h"
 #include "vp10/encoder/encoder.h"
 #include "vp10/encoder/ethread.h"
-#include "vpx_dsp/vpx_dsp_common.h"
 
 static void accumulate_rd_opt(ThreadData *td, ThreadData *td_t) {
   int i, j, k, l, m, n;
@@ -30,11 +29,6 @@ static void accumulate_rd_opt(ThreadData *td, ThreadData *td_t) {
             for (n = 0; n < ENTROPY_TOKENS; n++)
               td->rd_counts.coef_counts[i][j][k][l][m][n] +=
                   td_t->rd_counts.coef_counts[i][j][k][l][m][n];
-
-
-  // Counts of all motion searches and exhuastive mesh searches.
-  td->rd_counts.m_search_count += td_t->rd_counts.m_search_count;
-  td->rd_counts.ex_search_count += td_t->rd_counts.ex_search_count;
 }
 
 static int enc_worker_hook(EncWorkerData *const thread_data, void *unused) {
@@ -57,11 +51,23 @@ static int enc_worker_hook(EncWorkerData *const thread_data, void *unused) {
   return 0;
 }
 
+static int get_max_tile_cols(VP10_COMP *cpi) {
+  const int aligned_width = ALIGN_POWER_OF_TWO(cpi->oxcf.width, MI_SIZE_LOG2);
+  int mi_cols = aligned_width >> MI_SIZE_LOG2;
+  int min_log2_tile_cols, max_log2_tile_cols;
+  int log2_tile_cols;
+
+  vp10_get_tile_n_bits(mi_cols, &min_log2_tile_cols, &max_log2_tile_cols);
+  log2_tile_cols = clamp(cpi->oxcf.tile_columns,
+                   min_log2_tile_cols, max_log2_tile_cols);
+  return (1 << log2_tile_cols);
+}
+
 void vp10_encode_tiles_mt(VP10_COMP *cpi) {
   VP10_COMMON *const cm = &cpi->common;
   const int tile_cols = 1 << cm->log2_tile_cols;
   const VPxWorkerInterface *const winterface = vpx_get_worker_interface();
-  const int num_workers = VPXMIN(cpi->oxcf.max_threads, tile_cols);
+  const int num_workers = MIN(cpi->oxcf.max_threads, tile_cols);
   int i;
 
   vp10_init_tile_data(cpi);
@@ -69,6 +75,13 @@ void vp10_encode_tiles_mt(VP10_COMP *cpi) {
   // Only run once to create threads and allocate thread data.
   if (cpi->num_workers == 0) {
     int allocated_workers = num_workers;
+
+    // While using SVC, we need to allocate threads according to the highest
+    // resolution.
+    if (cpi->use_svc) {
+      int max_tile_cols = get_max_tile_cols(cpi);
+      allocated_workers = MIN(cpi->oxcf.max_threads, max_tile_cols);
+    }
 
     CHECK_MEM_ERROR(cm, cpi->workers,
                     vpx_malloc(allocated_workers * sizeof(*cpi->workers)));
@@ -132,6 +145,23 @@ void vp10_encode_tiles_mt(VP10_COMP *cpi) {
     if (thread_data->td->counts != &cpi->common.counts) {
       memcpy(thread_data->td->counts, &cpi->common.counts,
              sizeof(cpi->common.counts));
+    }
+
+    // Handle use_nonrd_pick_mode case.
+    if (cpi->sf.use_nonrd_pick_mode) {
+      MACROBLOCK *const x = &thread_data->td->mb;
+      MACROBLOCKD *const xd = &x->e_mbd;
+      struct macroblock_plane *const p = x->plane;
+      struct macroblockd_plane *const pd = xd->plane;
+      PICK_MODE_CONTEXT *ctx = &thread_data->td->pc_root->none;
+      int j;
+
+      for (j = 0; j < MAX_MB_PLANE; ++j) {
+        p[j].coeff = ctx->coeff_pbuf[j][0];
+        p[j].qcoeff = ctx->qcoeff_pbuf[j][0];
+        pd[j].dqcoeff = ctx->dqcoeff_pbuf[j][0];
+        p[j].eobs = ctx->eobs_pbuf[j][0];
+      }
     }
   }
 

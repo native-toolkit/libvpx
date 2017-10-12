@@ -13,7 +13,6 @@
 #include "vp10/common/loopfilter.h"
 #include "vp10/common/onyxc_int.h"
 #include "vp10/common/reconinter.h"
-#include "vpx_dsp/vpx_dsp_common.h"
 #include "vpx_mem/vpx_mem.h"
 #include "vpx_ports/mem.h"
 
@@ -719,11 +718,7 @@ static void build_masks(const loop_filter_info_n *const lfi_n,
   uint64_t *const int_4x4_y = &lfm->int_4x4_y;
   uint16_t *const left_uv = &lfm->left_uv[tx_size_uv];
   uint16_t *const above_uv = &lfm->above_uv[tx_size_uv];
-#if CONFIG_MISC_FIXES
-  uint16_t *const int_4x4_uv = &lfm->left_int_4x4_uv;
-#else
   uint16_t *const int_4x4_uv = &lfm->int_4x4_uv;
-#endif
   int i;
 
   // If filter level is 0 we don't loop filter.
@@ -758,13 +753,8 @@ static void build_masks(const loop_filter_info_n *const lfi_n,
 
   // If the block has no coefficients and is not intra we skip applying
   // the loop filter on block edges.
-#if CONFIG_MISC_FIXES
-  if ((mbmi->skip || mbmi->has_no_coeffs) && is_inter_block(mbmi))
-    return;
-#else
   if (mbmi->skip && is_inter_block(mbmi))
     return;
-#endif
 
   // Here we are adding a mask for the transform size. The transform
   // size mask is set to be correct for a 64x64 prediction block size. We
@@ -821,13 +811,8 @@ static void build_y_mask(const loop_filter_info_n *const lfi_n,
   *above_y |= above_prediction_mask[block_size] << shift_y;
   *left_y |= left_prediction_mask[block_size] << shift_y;
 
-#if CONFIG_MISC_FIXES
-  if ((mbmi->skip || mbmi->has_no_coeffs) && is_inter_block(mbmi))
-    return;
-#else
   if (mbmi->skip && is_inter_block(mbmi))
     return;
-#endif
 
   *above_y |= (size_mask[block_size] &
                above_64x64_txform_mask[tx_size_y]) << shift_y;
@@ -1019,11 +1004,7 @@ void vp10_setup_mask(VP10_COMMON *const cm, const int mi_row, const int mi_col,
       lfm->above_uv[i] &= mask_uv;
     }
     lfm->int_4x4_y &= mask_y;
-#if CONFIG_MISC_FIXES
-    lfm->above_int_4x4_uv = lfm->left_int_4x4_uv & mask_uv;
-#else
     lfm->int_4x4_uv &= mask_uv;
-#endif
 
     // We don't apply a wide loop filter on the last uv block row. If set
     // apply the shorter one instead.
@@ -1057,11 +1038,7 @@ void vp10_setup_mask(VP10_COMMON *const cm, const int mi_row, const int mi_col,
       lfm->above_uv[i] &= mask_uv;
     }
     lfm->int_4x4_y &= mask_y;
-#if CONFIG_MISC_FIXES
-    lfm->left_int_4x4_uv &= mask_uv_int;
-#else
     lfm->int_4x4_uv &= mask_uv_int;
-#endif
 
     // We don't apply a wide loop filter on the last uv column. If set
     // apply the shorter one instead.
@@ -1091,11 +1068,7 @@ void vp10_setup_mask(VP10_COMMON *const cm, const int mi_row, const int mi_col,
   assert(!(lfm->left_uv[TX_16X16]&lfm->left_uv[TX_8X8]));
   assert(!(lfm->left_uv[TX_16X16] & lfm->left_uv[TX_4X4]));
   assert(!(lfm->left_uv[TX_8X8] & lfm->left_uv[TX_4X4]));
-#if CONFIG_MISC_FIXES
-  assert(!(lfm->left_int_4x4_uv & lfm->left_uv[TX_16X16]));
-#else
   assert(!(lfm->int_4x4_uv & lfm->left_uv[TX_16X16]));
-#endif
   assert(!(lfm->above_y[TX_16X16] & lfm->above_y[TX_8X8]));
   assert(!(lfm->above_y[TX_16X16] & lfm->above_y[TX_4X4]));
   assert(!(lfm->above_y[TX_8X8] & lfm->above_y[TX_4X4]));
@@ -1103,11 +1076,7 @@ void vp10_setup_mask(VP10_COMMON *const cm, const int mi_row, const int mi_col,
   assert(!(lfm->above_uv[TX_16X16] & lfm->above_uv[TX_8X8]));
   assert(!(lfm->above_uv[TX_16X16] & lfm->above_uv[TX_4X4]));
   assert(!(lfm->above_uv[TX_8X8] & lfm->above_uv[TX_4X4]));
-#if CONFIG_MISC_FIXES
-  assert(!(lfm->above_int_4x4_uv & lfm->above_uv[TX_16X16]));
-#else
   assert(!(lfm->int_4x4_uv & lfm->above_uv[TX_16X16]));
-#endif
 }
 
 static void filter_selectively_vert(uint8_t *s, int pitch,
@@ -1462,11 +1431,7 @@ void vp10_filter_block_plane_ss11(VP10_COMMON *const cm,
   uint16_t mask_16x16 = lfm->left_uv[TX_16X16];
   uint16_t mask_8x8 = lfm->left_uv[TX_8X8];
   uint16_t mask_4x4 = lfm->left_uv[TX_4X4];
-#if CONFIG_MISC_FIXES
-  uint16_t mask_4x4_int = lfm->left_int_4x4_uv;
-#else
   uint16_t mask_4x4_int = lfm->int_4x4_uv;
-#endif
 
   assert(plane->subsampling_x == 1 && plane->subsampling_y == 1);
 
@@ -1518,11 +1483,7 @@ void vp10_filter_block_plane_ss11(VP10_COMMON *const cm,
   mask_16x16 = lfm->above_uv[TX_16X16];
   mask_8x8 = lfm->above_uv[TX_8X8];
   mask_4x4 = lfm->above_uv[TX_4X4];
-#if CONFIG_MISC_FIXES
-  mask_4x4_int = lfm->above_int_4x4_uv;
-#else
   mask_4x4_int = lfm->int_4x4_uv;
-#endif
 
   for (r = 0; r < MI_BLOCK_SIZE && mi_row + r < cm->mi_rows; r += 2) {
     const int skip_border_4x4_r = mi_row + r == cm->mi_rows - 1;
@@ -1627,7 +1588,7 @@ void vp10_loop_filter_frame(YV12_BUFFER_CONFIG *frame,
   if (partial_frame && cm->mi_rows > 8) {
     start_mi_row = cm->mi_rows >> 1;
     start_mi_row &= 0xfffffff8;
-    mi_rows_to_filter = VPXMAX(cm->mi_rows / 8, 8);
+    mi_rows_to_filter = MAX(cm->mi_rows / 8, 8);
   }
   end_mi_row = start_mi_row + mi_rows_to_filter;
   vp10_loop_filter_frame_init(cm, frame_filter_level);

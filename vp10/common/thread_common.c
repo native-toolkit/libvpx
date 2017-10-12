@@ -9,7 +9,6 @@
  */
 
 #include "./vpx_config.h"
-#include "vpx_dsp/vpx_dsp_common.h"
 #include "vpx_mem/vpx_mem.h"
 #include "vp10/common/entropymode.h"
 #include "vp10/common/thread_common.h"
@@ -166,7 +165,7 @@ static void loop_filter_rows_mt(YV12_BUFFER_CONFIG *frame,
   // Decoder may allocate more threads than number of tiles based on user's
   // input.
   const int tile_cols = 1 << cm->log2_tile_cols;
-  const int num_workers = VPXMIN(nworkers, tile_cols);
+  const int num_workers = MIN(nworkers, tile_cols);
   int i;
 
   if (!lf_sync->sync_range || sb_rows != lf_sync->rows ||
@@ -230,7 +229,7 @@ void vp10_loop_filter_frame_mt(YV12_BUFFER_CONFIG *frame,
   if (partial_frame && cm->mi_rows > 8) {
     start_mi_row = cm->mi_rows >> 1;
     start_mi_row &= 0xfffffff8;
-    mi_rows_to_filter = VPXMAX(cm->mi_rows / 8, 8);
+    mi_rows_to_filter = MAX(cm->mi_rows / 8, 8);
   }
   end_mi_row = start_mi_row + mi_rows_to_filter;
   vp10_loop_filter_frame_init(cm, frame_filter_level);
@@ -434,15 +433,4 @@ void vp10_accumulate_frame_counts(VP10_COMMON *cm, FRAME_COUNTS *counts,
     for (i = 0; i < MV_FP_SIZE; i++)
       comps->fp[i] += comps_t->fp[i];
   }
-
-#if CONFIG_MISC_FIXES
-  for (i = 0; i < PREDICTION_PROBS; i++)
-    for (j = 0; j < 2; j++)
-      cm->counts.seg.pred[i][j] += counts->seg.pred[i][j];
-
-  for (i = 0; i < MAX_SEGMENTS; i++) {
-    cm->counts.seg.tree_total[i] += counts->seg.tree_total[i];
-    cm->counts.seg.tree_mispred[i] += counts->seg.tree_mispred[i];
-  }
-#endif
 }

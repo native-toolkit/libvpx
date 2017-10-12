@@ -126,9 +126,6 @@ VP10Decoder *vp10_decoder_create(BufferPool *const pool) {
 void vp10_decoder_remove(VP10Decoder *pbi) {
   int i;
 
-  if (!pbi)
-    return;
-
   vpx_get_worker_interface()->end(&pbi->lf_worker);
   vpx_free(pbi->lf_worker.data1);
   vpx_free(pbi->tile_data);
@@ -261,7 +258,7 @@ static void swap_frame_buffers(VP10Decoder *pbi) {
   pbi->hold_ref_buf = 0;
   cm->frame_to_show = get_frame_new_buffer(cm);
 
-  if (!cm->frame_parallel_decode || !cm->show_frame) {
+  if (!pbi->frame_parallel_decode || !cm->show_frame) {
     lock_buffer_pool(pool);
     --frame_bufs[cm->new_fb_idx].ref_count;
     unlock_buffer_pool(pool);
@@ -300,7 +297,7 @@ int vp10_receive_compressed_data(VP10Decoder *pbi,
 
   // Check if the previous frame was a frame without any references to it.
   // Release frame buffer if not decoding in frame parallel mode.
-  if (!cm->frame_parallel_decode && cm->new_fb_idx >= 0
+  if (!pbi->frame_parallel_decode && cm->new_fb_idx >= 0
       && frame_bufs[cm->new_fb_idx].ref_count == 0)
     pool->release_fb_cb(pool->cb_priv,
                         &frame_bufs[cm->new_fb_idx].raw_frame_buffer);
@@ -313,7 +310,7 @@ int vp10_receive_compressed_data(VP10Decoder *pbi,
   cm->cur_frame = &pool->frame_bufs[cm->new_fb_idx];
 
   pbi->hold_ref_buf = 0;
-  if (cm->frame_parallel_decode) {
+  if (pbi->frame_parallel_decode) {
     VPxWorker *const worker = pbi->frame_worker_owner;
     vp10_frameworker_lock_stats(worker);
     frame_bufs[cm->new_fb_idx].frame_worker_owner = worker;
@@ -382,12 +379,12 @@ int vp10_receive_compressed_data(VP10Decoder *pbi,
   if (!cm->show_existing_frame) {
     cm->last_show_frame = cm->show_frame;
     cm->prev_frame = cm->cur_frame;
-    if (cm->seg.enabled && !cm->frame_parallel_decode)
+    if (cm->seg.enabled && !pbi->frame_parallel_decode)
       vp10_swap_current_and_last_seg_map(cm);
   }
 
   // Update progress in frame parallel decode.
-  if (cm->frame_parallel_decode) {
+  if (pbi->frame_parallel_decode) {
     // Need to lock the mutex here as another thread may
     // be accessing this buffer.
     VPxWorker *const worker = pbi->frame_worker_owner;
@@ -459,9 +456,6 @@ vpx_codec_err_t vp10_parse_superframe_index(const uint8_t *data,
   // an invalid bitstream and need to return an error.
 
   uint8_t marker;
-#if CONFIG_MISC_FIXES
-  size_t frame_sz_sum = 0;
-#endif
 
   assert(data_sz);
   marker = read_marker(decrypt_cb, decrypt_state, data + data_sz - 1);
@@ -470,7 +464,7 @@ vpx_codec_err_t vp10_parse_superframe_index(const uint8_t *data,
   if ((marker & 0xe0) == 0xc0) {
     const uint32_t frames = (marker & 0x7) + 1;
     const uint32_t mag = ((marker >> 3) & 0x3) + 1;
-    const size_t index_sz = 2 + mag * (frames - CONFIG_MISC_FIXES);
+    const size_t index_sz = 2 + mag * frames;
 
     // This chunk is marked as having a superframe index but doesn't have
     // enough data for it, thus it's an invalid superframe index.
@@ -501,20 +495,13 @@ vpx_codec_err_t vp10_parse_superframe_index(const uint8_t *data,
         x = clear_buffer;
       }
 
-      for (i = 0; i < frames - CONFIG_MISC_FIXES; ++i) {
+      for (i = 0; i < frames; ++i) {
         uint32_t this_sz = 0;
 
         for (j = 0; j < mag; ++j)
           this_sz |= (*x++) << (j * 8);
-        this_sz += CONFIG_MISC_FIXES;
         sizes[i] = this_sz;
-#if CONFIG_MISC_FIXES
-        frame_sz_sum += this_sz;
-#endif
       }
-#if CONFIG_MISC_FIXES
-      sizes[i] = data_sz - index_sz - frame_sz_sum;
-#endif
       *count = frames;
     }
   }

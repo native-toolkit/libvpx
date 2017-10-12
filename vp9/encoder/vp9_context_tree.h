@@ -14,10 +14,6 @@
 #include "vp9/common/vp9_blockd.h"
 #include "vp9/encoder/vp9_block.h"
 
-#ifdef __cplusplus
-extern "C" {
-#endif
-
 struct VP9_COMP;
 struct VP9Common;
 struct ThreadData;
@@ -60,7 +56,6 @@ typedef struct {
 #if CONFIG_VP9_TEMPORAL_DENOISING
   unsigned int newmv_sse;
   unsigned int zeromv_sse;
-  unsigned int zeromv_lastref_sse;
   PREDICTION_MODE best_sse_inter_mode;
   int_mv best_sse_mv;
   MV_REFERENCE_FRAME best_reference_frame;
@@ -88,9 +83,5 @@ typedef struct PC_TREE {
 
 void vp9_setup_pc_tree(struct VP9Common *cm, struct ThreadData *td);
 void vp9_free_pc_tree(struct ThreadData *td);
-
-#ifdef __cplusplus
-}  // extern "C"
-#endif
 
 #endif /* VP9_ENCODER_VP9_CONTEXT_TREE_H_ */

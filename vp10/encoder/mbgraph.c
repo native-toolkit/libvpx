@@ -13,7 +13,6 @@
 #include "./vp10_rtcd.h"
 #include "./vpx_dsp_rtcd.h"
 
-#include "vpx_dsp/vpx_dsp_common.h"
 #include "vpx_mem/vpx_mem.h"
 #include "vpx_ports/system_state.h"
 #include "vp10/encoder/segmentation.h"
@@ -42,7 +41,7 @@ static unsigned int do_16x16_motion_iteration(VP10_COMP *cpi,
 
   // Further step/diamond searches as necessary
   int step_param = mv_sf->reduce_first_step_size;
-  step_param = VPXMIN(step_param, MAX_MVSEARCH_STEPS - 2);
+  step_param = MIN(step_param, MAX_MVSEARCH_STEPS - 2);
 
   vp10_set_mv_search_range(x, ref_mv);
 
@@ -146,7 +145,7 @@ static int find_best_16x16_intra(VP10_COMP *cpi, PREDICTION_MODE *pbest_mode) {
     unsigned int err;
 
     xd->mi[0]->mbmi.mode = mode;
-    vp10_predict_intra_block(xd, 2, 2, TX_16X16, mode,
+    vp10_predict_intra_block(xd, 2, TX_16X16, mode,
                             x->plane[0].src.buf, x->plane[0].src.stride,
                             xd->plane[0].dst.buf, xd->plane[0].dst.stride,
                             0, 0, 0);

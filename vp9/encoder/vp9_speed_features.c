@@ -13,24 +13,7 @@
 #include "vp9/encoder/vp9_encoder.h"
 #include "vp9/encoder/vp9_speed_features.h"
 #include "vp9/encoder/vp9_rdopt.h"
-#include "vpx_dsp/vpx_dsp_common.h"
 
-// Mesh search patters for various speed settings
-static MESH_PATTERN best_quality_mesh_pattern[MAX_MESH_STEP] =
-    {{64, 4}, {28, 2}, {15, 1}, {7, 1}};
-
-#define MAX_MESH_SPEED 5  // Max speed setting for mesh motion method
-static MESH_PATTERN good_quality_mesh_patterns[MAX_MESH_SPEED + 1]
-                                              [MAX_MESH_STEP] =
-    {{{64, 8}, {28, 4}, {15, 1}, {7, 1}},
-     {{64, 8}, {28, 4}, {15, 1}, {7, 1}},
-     {{64, 8},  {14, 2}, {7, 1},  {7, 1}},
-     {{64, 16}, {24, 8}, {12, 4}, {7, 1}},
-     {{64, 16}, {24, 8}, {12, 4}, {7, 1}},
-     {{64, 16}, {24, 8}, {12, 4}, {7, 1}},
-    };
-static unsigned char good_quality_max_mesh_pct[MAX_MESH_SPEED + 1] =
-    {50, 25, 15, 5, 1, 1};
 
 // Intra only frames, golden frames (except alt ref overlays) and
 // alt ref frames tend to be coded at a higher than ambient quality
@@ -66,7 +49,7 @@ static void set_good_speed_feature_framesize_dependent(VP9_COMP *cpi,
   VP9_COMMON *const cm = &cpi->common;
 
   if (speed >= 1) {
-    if (VPXMIN(cm->width, cm->height) >= 720) {
+    if (MIN(cm->width, cm->height) >= 720) {
       sf->disable_split_mask = cm->show_frame ? DISABLE_ALL_SPLIT
                                               : DISABLE_ALL_INTER_SPLIT;
       sf->partition_search_breakout_dist_thr = (1 << 23);
@@ -77,7 +60,7 @@ static void set_good_speed_feature_framesize_dependent(VP9_COMP *cpi,
   }
 
   if (speed >= 2) {
-    if (VPXMIN(cm->width, cm->height) >= 720) {
+    if (MIN(cm->width, cm->height) >= 720) {
       sf->disable_split_mask = cm->show_frame ? DISABLE_ALL_SPLIT
                                               : DISABLE_ALL_INTER_SPLIT;
       sf->adaptive_pred_interp_filter = 0;
@@ -92,7 +75,7 @@ static void set_good_speed_feature_framesize_dependent(VP9_COMP *cpi,
   }
 
   if (speed >= 3) {
-    if (VPXMIN(cm->width, cm->height) >= 720) {
+    if (MIN(cm->width, cm->height) >= 720) {
       sf->disable_split_mask = DISABLE_ALL_SPLIT;
       sf->schedule_mode_search = cm->base_qindex < 220 ? 1 : 0;
       sf->partition_search_breakout_dist_thr = (1 << 25);
@@ -116,7 +99,7 @@ static void set_good_speed_feature_framesize_dependent(VP9_COMP *cpi,
   }
 
   if (speed >= 4) {
-    if (VPXMIN(cm->width, cm->height) >= 720) {
+    if (MIN(cm->width, cm->height) >= 720) {
       sf->partition_search_breakout_dist_thr = (1 << 26);
     } else {
       sf->partition_search_breakout_dist_thr = (1 << 24);
@@ -129,14 +112,8 @@ static void set_good_speed_feature(VP9_COMP *cpi, VP9_COMMON *cm,
                                    SPEED_FEATURES *sf, int speed) {
   const int boosted = frame_is_boosted(cpi);
 
-  sf->partition_search_breakout_dist_thr = (1 << 20);
-  sf->partition_search_breakout_rate_thr = 80;
-  sf->tx_size_search_breakout = 1;
   sf->adaptive_rd_thresh = 1;
   sf->allow_skip_recode = 1;
-  sf->less_rectangular_check = 1;
-  sf->use_square_partition_only = !frame_is_boosted(cpi);
-  sf->use_square_only_threshold = BLOCK_16X16;
 
   if (speed >= 1) {
     if ((cpi->twopass.fr_content_type == FC_GRAPHICS_ANIMATION) ||
@@ -145,7 +122,6 @@ static void set_good_speed_feature(VP9_COMP *cpi, VP9_COMMON *cm,
     } else {
       sf->use_square_partition_only = !frame_is_intra_only(cm);
     }
-    sf->use_square_only_threshold = BLOCK_4X4;
 
     sf->less_rectangular_check  = 1;
 
@@ -162,6 +138,9 @@ static void set_good_speed_feature(VP9_COMP *cpi, VP9_COMMON *cm,
     sf->intra_uv_mode_mask[TX_32X32] = INTRA_DC_H_V;
     sf->intra_y_mode_mask[TX_16X16] = INTRA_DC_H_V;
     sf->intra_uv_mode_mask[TX_16X16] = INTRA_DC_H_V;
+
+    sf->tx_size_search_breakout = 1;
+    sf->partition_search_breakout_rate_thr = 80;
   }
 
   if (speed >= 2) {
@@ -236,7 +215,7 @@ static void set_rt_speed_feature_framesize_dependent(VP9_COMP *cpi,
   VP9_COMMON *const cm = &cpi->common;
 
   if (speed >= 1) {
-    if (VPXMIN(cm->width, cm->height) >= 720) {
+    if (MIN(cm->width, cm->height) >= 720) {
       sf->disable_split_mask = cm->show_frame ? DISABLE_ALL_SPLIT
                                               : DISABLE_ALL_INTER_SPLIT;
     } else {
@@ -245,7 +224,7 @@ static void set_rt_speed_feature_framesize_dependent(VP9_COMP *cpi,
   }
 
   if (speed >= 2) {
-    if (VPXMIN(cm->width, cm->height) >= 720) {
+    if (MIN(cm->width, cm->height) >= 720) {
       sf->disable_split_mask = cm->show_frame ? DISABLE_ALL_SPLIT
                                               : DISABLE_ALL_INTER_SPLIT;
     } else {
@@ -254,7 +233,7 @@ static void set_rt_speed_feature_framesize_dependent(VP9_COMP *cpi,
   }
 
   if (speed >= 5) {
-    if (VPXMIN(cm->width, cm->height) >= 720) {
+    if (MIN(cm->width, cm->height) >= 720) {
       sf->partition_search_breakout_dist_thr = (1 << 25);
     } else {
       sf->partition_search_breakout_dist_thr = (1 << 23);
@@ -262,7 +241,7 @@ static void set_rt_speed_feature_framesize_dependent(VP9_COMP *cpi,
   }
 
   if (speed >= 7) {
-    sf->encode_breakout_thresh = (VPXMIN(cm->width, cm->height) >= 720) ?
+    sf->encode_breakout_thresh = (MIN(cm->width, cm->height) >= 720) ?
         800 : 300;
   }
 }
@@ -275,8 +254,6 @@ static void set_rt_speed_feature(VP9_COMP *cpi, SPEED_FEATURES *sf,
   sf->static_segmentation = 0;
   sf->adaptive_rd_thresh = 1;
   sf->use_fast_coef_costing = 1;
-  sf->allow_exhaustive_searches = 0;
-  sf->exhaustive_searches_thresh = INT_MAX;
 
   if (speed >= 1) {
     sf->use_square_partition_only = !frame_is_intra_only(cm);
@@ -404,6 +381,7 @@ static void set_rt_speed_feature(VP9_COMP *cpi, SPEED_FEATURES *sf,
   }
 
   if (speed >= 6) {
+    // Adaptively switch between SOURCE_VAR_BASED_PARTITION and FIXED_PARTITION.
     sf->partition_search_type = VAR_BASED_PARTITION;
     // Turn on this to use non-RD key frame coding mode.
     sf->use_nonrd_pick_mode = 1;
@@ -478,6 +456,7 @@ void vp9_set_speed_features_framesize_independent(VP9_COMP *cpi) {
   sf->mv.auto_mv_step_size = 0;
   sf->mv.fullpel_search_step_param = 6;
   sf->comp_inter_joint_search_thresh = BLOCK_4X4;
+  sf->adaptive_rd_thresh = 0;
   sf->tx_size_search_method = USE_FULL_RD;
   sf->use_lp32x32fdct = 0;
   sf->adaptive_motion_search = 0;
@@ -492,7 +471,6 @@ void vp9_set_speed_features_framesize_independent(VP9_COMP *cpi) {
   sf->partition_search_type = SEARCH_PARTITION;
   sf->less_rectangular_check = 0;
   sf->use_square_partition_only = 0;
-  sf->use_square_only_threshold = BLOCK_SIZES;
   sf->auto_min_max_partition_size = NOT_IN_USE;
   sf->rd_auto_partition_min_limit = BLOCK_4X4;
   sf->default_max_partition_size = BLOCK_64X64;
@@ -533,13 +511,10 @@ void vp9_set_speed_features_framesize_independent(VP9_COMP *cpi) {
   // Recode loop tolerance %.
   sf->recode_tolerance = 25;
   sf->default_interp_filter = SWITCHABLE;
+  sf->tx_size_search_breakout = 0;
+  sf->partition_search_breakout_dist_thr = 0;
+  sf->partition_search_breakout_rate_thr = 0;
   sf->simple_model_rd_from_var = 0;
-
-  // Some speed-up features even for best quality as minimal impact on quality.
-  sf->adaptive_rd_thresh = 1;
-  sf->tx_size_search_breakout = 1;
-  sf->partition_search_breakout_dist_thr = (1 << 19);
-  sf->partition_search_breakout_rate_thr = 80;
 
   if (oxcf->mode == REALTIME)
     set_rt_speed_feature(cpi, sf, oxcf->speed, oxcf->content);
@@ -547,36 +522,8 @@ void vp9_set_speed_features_framesize_independent(VP9_COMP *cpi) {
     set_good_speed_feature(cpi, cm, sf, oxcf->speed);
 
   cpi->full_search_sad = vp9_full_search_sad;
-  cpi->diamond_search_sad = vp9_diamond_search_sad;
-
-  sf->allow_exhaustive_searches = 1;
-  if (oxcf->mode == BEST) {
-    if (cpi->twopass.fr_content_type == FC_GRAPHICS_ANIMATION)
-      sf->exhaustive_searches_thresh = (1 << 20);
-    else
-      sf->exhaustive_searches_thresh = (1 << 21);
-    sf->max_exaustive_pct = 100;
-    for (i = 0; i < MAX_MESH_STEP; ++i) {
-      sf->mesh_patterns[i].range = best_quality_mesh_pattern[i].range;
-      sf->mesh_patterns[i].interval = best_quality_mesh_pattern[i].interval;
-    }
-  } else {
-    int speed = (oxcf->speed > MAX_MESH_SPEED) ? MAX_MESH_SPEED : oxcf->speed;
-    if (cpi->twopass.fr_content_type == FC_GRAPHICS_ANIMATION)
-      sf->exhaustive_searches_thresh = (1 << 22);
-    else
-      sf->exhaustive_searches_thresh = (1 << 23);
-    sf->max_exaustive_pct = good_quality_max_mesh_pct[speed];
-    if (speed > 0)
-      sf->exhaustive_searches_thresh = sf->exhaustive_searches_thresh << 1;
-
-    for (i = 0; i < MAX_MESH_STEP; ++i) {
-      sf->mesh_patterns[i].range =
-          good_quality_mesh_patterns[speed][i].range;
-      sf->mesh_patterns[i].interval =
-          good_quality_mesh_patterns[speed][i].interval;
-    }
-  }
+  cpi->diamond_search_sad = oxcf->mode == BEST ? vp9_full_range_search
+                                               : vp9_diamond_search_sad;
 
   // Slow quant, dct and trellis not worthwhile for first pass
   // so make sure they are always turned off.

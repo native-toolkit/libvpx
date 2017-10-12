@@ -403,6 +403,7 @@ const vpx_prob vp10_pareto8_full[COEFF_PROB_MODELS][MODEL_NODES] = {
   {255, 241, 243, 255, 236, 255, 252, 254},
   {255, 243, 245, 255, 237, 255, 252, 254},
   {255, 246, 247, 255, 239, 255, 253, 255},
+  {255, 246, 247, 255, 239, 255, 253, 255},
 };
 
 static const vp10_coeff_probs_model default_coef_probs_4x4[PLANE_TYPES] = {
@@ -742,9 +743,7 @@ static const vp10_coeff_probs_model default_coef_probs_32x32[PLANE_TYPES] = {
 };
 
 static void extend_to_full_distribution(vpx_prob *probs, vpx_prob p) {
-  // TODO(aconverse): model[PIVOT_NODE] should never be zero.
-  // https://code.google.com/p/webm/issues/detail?id=1089
-  memcpy(probs, vp10_pareto8_full[p == 0 ? 254 : p - 1],
+  memcpy(probs, vp10_pareto8_full[p = 0 ? 0 : p - 1],
          MODEL_NODES * sizeof(vpx_prob));
 }
 

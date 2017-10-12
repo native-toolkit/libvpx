@@ -14,7 +14,6 @@
 
 #include "./vpx_config.h"
 
-#include "vpx_dsp/vpx_dsp_common.h"
 #include "vpx_ports/mem.h"
 #include "vpx_scale/yv12config.h"
 
@@ -70,9 +69,6 @@ typedef struct {
   PREDICTION_MODE mode;
   TX_SIZE tx_size;
   int8_t skip;
-#if CONFIG_MISC_FIXES
-  int8_t has_no_coeffs;
-#endif
   int8_t segment_id;
   int8_t seg_id_predicted;  // valid only when temporal_update is enabled
 
@@ -131,7 +127,6 @@ struct macroblockd_plane {
   ENTROPY_CONTEXT *above_context;
   ENTROPY_CONTEXT *left_context;
   int16_t seg_dequant[MAX_SEGMENTS][2];
-  uint8_t *color_index_map;
 
   // number of 4x4s in current block
   uint16_t n4_w, n4_h;
@@ -171,6 +166,8 @@ typedef struct macroblockd {
   int up_available;
   int left_available;
 
+  const vpx_prob (*partition_probs)[PARTITION_TYPES - 1];
+
   /* Distance of MB away from frame edges */
   int mb_to_left_edge;
   int mb_to_right_edge;
@@ -178,6 +175,7 @@ typedef struct macroblockd {
   int mb_to_bottom_edge;
 
   FRAME_CONTEXT *fc;
+  int frame_parallel_decoding_mode;
 
   /* pointers to reference frames */
   RefBuffer *block_refs[2];
@@ -196,7 +194,7 @@ typedef struct macroblockd {
   int bd;
 #endif
 
-  int lossless[MAX_SEGMENTS];
+  int lossless;
   int corrupted;
 
   struct vpx_internal_error_info *error_info;
@@ -220,16 +218,24 @@ static const TX_TYPE intra_mode_to_tx_type_lookup[INTRA_MODES] = {
   ADST_ADST,  // TM
 };
 
-static INLINE TX_TYPE get_tx_type(PLANE_TYPE plane_type, const MACROBLOCKD *xd,
-                                  int block_idx) {
-  const MODE_INFO *const mi = xd->mi[0];
-  const MB_MODE_INFO *const mbmi = &mi->mbmi;
+static INLINE TX_TYPE get_tx_type(PLANE_TYPE plane_type,
+                                  const MACROBLOCKD *xd) {
+  const MB_MODE_INFO *const mbmi = &xd->mi[0]->mbmi;
 
-  if (plane_type != PLANE_TYPE_Y || xd->lossless[mbmi->segment_id] ||
-      is_inter_block(mbmi) || mbmi->tx_size >= TX_32X32)
+  if (plane_type != PLANE_TYPE_Y || xd->lossless || is_inter_block(mbmi))
     return DCT_DCT;
 
-  return intra_mode_to_tx_type_lookup[get_y_mode(mi, block_idx)];
+  return intra_mode_to_tx_type_lookup[mbmi->mode];
+}
+
+static INLINE TX_TYPE get_tx_type_4x4(PLANE_TYPE plane_type,
+                                      const MACROBLOCKD *xd, int ib) {
+  const MODE_INFO *const mi = xd->mi[0];
+
+  if (plane_type != PLANE_TYPE_Y || xd->lossless || is_inter_block(&mi->mbmi))
+    return DCT_DCT;
+
+  return intra_mode_to_tx_type_lookup[get_y_mode(mi, ib)];
 }
 
 void vp10_setup_block_planes(MACROBLOCKD *xd, int ss_x, int ss_y);
@@ -240,7 +246,7 @@ static INLINE TX_SIZE get_uv_tx_size_impl(TX_SIZE y_tx_size, BLOCK_SIZE bsize,
     return TX_4X4;
   } else {
     const BLOCK_SIZE plane_bsize = ss_size_lookup[bsize][xss][yss];
-    return VPXMIN(y_tx_size, max_txsize_lookup[plane_bsize]);
+    return MIN(y_tx_size, max_txsize_lookup[plane_bsize]);
   }
 }
 
@@ -267,8 +273,16 @@ static INLINE void reset_skip_context(MACROBLOCKD *xd, BLOCK_SIZE bsize) {
   }
 }
 
+static INLINE const vpx_prob *get_y_mode_probs(const MODE_INFO *mi,
+                                               const MODE_INFO *above_mi,
+                                               const MODE_INFO *left_mi,
+                                               int block) {
+  const PREDICTION_MODE above = vp10_above_block_mode(mi, above_mi, block);
+  const PREDICTION_MODE left = vp10_left_block_mode(mi, left_mi, block);
+  return vp10_kf_y_mode_prob[above][left];
+}
+
 typedef void (*foreach_transformed_block_visitor)(int plane, int block,
-                                                  int blk_row, int blk_col,
                                                   BLOCK_SIZE plane_bsize,
                                                   TX_SIZE tx_size,
                                                   void *arg);
@@ -281,6 +295,17 @@ void vp10_foreach_transformed_block_in_plane(
 void vp10_foreach_transformed_block(
     const MACROBLOCKD* const xd, BLOCK_SIZE bsize,
     foreach_transformed_block_visitor visit, void *arg);
+
+static INLINE void txfrm_block_to_raster_xy(BLOCK_SIZE plane_bsize,
+                                            TX_SIZE tx_size, int block,
+                                            int *x, int *y) {
+  const int bwl = b_width_log2_lookup[plane_bsize];
+  const int tx_cols_log2 = bwl - tx_size;
+  const int tx_cols = 1 << tx_cols_log2;
+  const int raster_mb = block >> (tx_size << 1);
+  *x = (raster_mb & (tx_cols - 1)) << tx_size;
+  *y = (raster_mb >> tx_cols_log2) << tx_size;
+}
 
 void vp10_set_contexts(const MACROBLOCKD *xd, struct macroblockd_plane *pd,
                       BLOCK_SIZE plane_bsize, TX_SIZE tx_size, int has_eob,

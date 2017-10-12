@@ -14,6 +14,11 @@
 #include "vpx_scale/yv12config.h"
 #include "vpx/vpx_integer.h"
 
+#if CONFIG_SPATIAL_SVC
+#include "vpx/vp8cx.h"
+#include "vpx/vpx_encoder.h"
+#endif
+
 #ifdef __cplusplus
 extern "C" {
 #endif

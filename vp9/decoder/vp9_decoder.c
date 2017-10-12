@@ -126,9 +126,6 @@ VP9Decoder *vp9_decoder_create(BufferPool *const pool) {
 void vp9_decoder_remove(VP9Decoder *pbi) {
   int i;
 
-  if (!pbi)
-    return;
-
   vpx_get_worker_interface()->end(&pbi->lf_worker);
   vpx_free(pbi->lf_worker.data1);
   vpx_free(pbi->tile_data);
@@ -137,6 +134,7 @@ void vp9_decoder_remove(VP9Decoder *pbi) {
     vpx_get_worker_interface()->end(worker);
   }
   vpx_free(pbi->tile_worker_data);
+  vpx_free(pbi->tile_worker_info);
   vpx_free(pbi->tile_workers);
 
   if (pbi->num_tile_workers > 0) {
@@ -243,7 +241,7 @@ static void swap_frame_buffers(VP9Decoder *pbi) {
     decrease_ref_count(old_idx, frame_bufs, pool);
 
     // Release the reference frame in reference map.
-    if (mask & 1) {
+    if ((mask & 1) && old_idx >= 0) {
       decrease_ref_count(old_idx, frame_bufs, pool);
     }
     cm->ref_frame_map[ref_index] = cm->next_ref_frame_map[ref_index];
@@ -350,7 +348,7 @@ int vp9_receive_compressed_data(VP9Decoder *pbi,
         decrease_ref_count(old_idx, frame_bufs, pool);
 
         // Release the reference frame in reference map.
-        if (mask & 1) {
+        if ((mask & 1) && old_idx >= 0) {
           decrease_ref_count(old_idx, frame_bufs, pool);
         }
         ++ref_index;

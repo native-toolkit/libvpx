@@ -15,9 +15,6 @@
 
 #include "vp10/encoder/cost.h"
 #include "vp10/encoder/encodemv.h"
-#include "vp10/encoder/subexp.h"
-
-#include "vpx_dsp/vpx_dsp_common.h"
 
 static struct vp10_token mv_joint_encodings[MV_JOINTS];
 static struct vp10_token mv_class_encodings[MV_CLASSES];
@@ -135,12 +132,8 @@ static void build_nmv_component_cost_table(int *mvcost,
   }
 }
 
-static void update_mv(vpx_writer *w, const unsigned int ct[2], vpx_prob *cur_p,
-                      vpx_prob upd_p) {
-#if CONFIG_MISC_FIXES
-  (void) upd_p;
-  vp10_cond_prob_diff_update(w, cur_p, ct);
-#else
+static int update_mv(vpx_writer *w, const unsigned int ct[2], vpx_prob *cur_p,
+                     vpx_prob upd_p) {
   const vpx_prob new_p = get_binary_prob(ct[0], ct[1]) | 1;
   const int update = cost_branch256(ct, *cur_p) + vp10_cost_zero(upd_p) >
                      cost_branch256(ct, new_p) + vp10_cost_one(upd_p) + 7 * 256;
@@ -149,7 +142,7 @@ static void update_mv(vpx_writer *w, const unsigned int ct[2], vpx_prob *cur_p,
     *cur_p = new_p;
     vpx_write_literal(w, new_p >> 1, 7);
   }
-#endif
+  return update;
 }
 
 static void write_mv_update(const vpx_tree_index *tree,
@@ -223,8 +216,8 @@ void vp10_encode_mv(VP10_COMP* cpi, vpx_writer* w,
   // If auto_mv_step_size is enabled then keep track of the largest
   // motion vector component used.
   if (cpi->sf.mv.auto_mv_step_size) {
-    unsigned int maxv = VPXMAX(abs(mv->row), abs(mv->col)) >> 3;
-    cpi->max_mv_magnitude = VPXMAX(maxv, cpi->max_mv_magnitude);
+    unsigned int maxv = MAX(abs(mv->row), abs(mv->col)) >> 3;
+    cpi->max_mv_magnitude = MAX(maxv, cpi->max_mv_magnitude);
   }
 }
 
@@ -244,7 +237,7 @@ static void inc_mvs(const MB_MODE_INFO *mbmi, const MB_MODE_INFO_EXT *mbmi_ext,
     const MV *ref = &mbmi_ext->ref_mvs[mbmi->ref_frame[i]][0].as_mv;
     const MV diff = {mvs[i].as_mv.row - ref->row,
                      mvs[i].as_mv.col - ref->col};
-    vp10_inc_mv(&diff, counts, vp10_use_mv_hp(ref));
+    vp10_inc_mv(&diff, counts);
   }
 }
 

@@ -13,7 +13,6 @@
 
 #include "vp10/common/enums.h"
 #include "vpx/vpx_integer.h"
-#include "vpx_dsp/vpx_dsp_common.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -31,14 +30,12 @@ static const uint8_t num_4x4_blocks_high_lookup[BLOCK_SIZES] =
 // Log 2 conversion lookup tables for modeinfo width and height
 static const uint8_t mi_width_log2_lookup[BLOCK_SIZES] =
   {0, 0, 0, 0, 0, 1, 1, 1, 2, 2, 2, 3, 3};
-static const uint8_t mi_height_log2_lookup[BLOCK_SIZES] =
-  {0, 0, 0, 0, 1, 0, 1, 2, 1, 2, 3, 2, 3};
 static const uint8_t num_8x8_blocks_wide_lookup[BLOCK_SIZES] =
   {1, 1, 1, 1, 1, 2, 2, 2, 4, 4, 4, 8, 8};
 static const uint8_t num_8x8_blocks_high_lookup[BLOCK_SIZES] =
   {1, 1, 1, 1, 2, 1, 2, 4, 2, 4, 8, 4, 8};
 
-// VPXMIN(3, VPXMIN(b_width_log2(bsize), b_height_log2(bsize)))
+// MIN(3, MIN(b_width_log2(bsize), b_height_log2(bsize)))
 static const uint8_t size_group_lookup[BLOCK_SIZES] =
   {0, 0, 0, 1, 1, 1, 2, 2, 2, 3, 3, 3, 3};
 

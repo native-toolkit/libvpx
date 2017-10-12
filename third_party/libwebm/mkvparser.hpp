@@ -9,13 +9,12 @@
 #ifndef MKVPARSER_HPP
 #define MKVPARSER_HPP
 
-#include <cstddef>
-#include <cstdio>
 #include <cstdlib>
+#include <cstdio>
+#include <cstddef>
 
 namespace mkvparser {
 
-const int E_PARSE_FAILED = -1;
 const int E_FILE_FORMAT_INVALID = -2;
 const int E_BUFFER_NOT_FULL = -3;
 
@@ -28,11 +27,8 @@ class IMkvReader {
   virtual ~IMkvReader();
 };
 
-template<typename Type> Type* SafeArrayAlloc(unsigned long long num_elements,
-                                             unsigned long long element_size);
 long long GetUIntLength(IMkvReader*, long long, long&);
 long long ReadUInt(IMkvReader*, long long, long&);
-long long ReadID(IMkvReader* pReader, long long pos, long& len);
 long long UnserializeUInt(IMkvReader*, long long pos, long long size);
 
 long UnserializeFloat(IMkvReader*, long long pos, long long size, double&);
@@ -837,7 +833,7 @@ class Cues {
 
  private:
   bool Init() const;
-  bool PreloadCuePoint(long&, long long) const;
+  void PreloadCuePoint(long&, long long) const;
 
   mutable CuePoint** m_cue_points;
   mutable long m_count;
@@ -1003,8 +999,8 @@ class Segment {
   long DoLoadClusterUnknownSize(long long&, long&);
   long DoParseNext(const Cluster*&, long long&, long&);
 
-  bool AppendCluster(Cluster*);
-  bool PreloadCluster(Cluster*, ptrdiff_t);
+  void AppendCluster(Cluster*);
+  void PreloadCluster(Cluster*, ptrdiff_t);
 
   // void ParseSeekHead(long long pos, long long size);
   // void ParseSeekEntry(long long pos, long long size);

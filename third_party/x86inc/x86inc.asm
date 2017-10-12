@@ -119,7 +119,7 @@
 %if ABI_IS_32BIT
     %if CONFIG_PIC=1
         %ifidn __OUTPUT_FORMAT__,elf32
-            %define GET_GOT_DEFINED 1
+            %define GET_GOT_SAVE_ARG 1
             %define WRT_PLT wrt ..plt
             %macro GET_GOT 1
                 extern _GLOBAL_OFFSET_TABLE_
@@ -138,7 +138,7 @@
                 %define RESTORE_GOT pop %1
             %endmacro
         %elifidn __OUTPUT_FORMAT__,macho32
-            %define GET_GOT_DEFINED 1
+            %define GET_GOT_SAVE_ARG 1
             %macro GET_GOT 1
                 push %1
                 call %%get_got
@@ -149,8 +149,6 @@
                 %undef RESTORE_GOT
                 %define RESTORE_GOT pop %1
             %endmacro
-        %else
-            %define GET_GOT_DEFINED 0
         %endif
     %endif
 
@@ -878,10 +876,6 @@ SECTION .note.GNU-stack noalloc noexec nowrite progbits
 %define    cpuflag(x) ((cpuflags & (cpuflags_ %+ x)) == (cpuflags_ %+ x))
 %define notcpuflag(x) ((cpuflags & (cpuflags_ %+ x)) != (cpuflags_ %+ x))
 
-%ifdef __NASM_VER__
-    %use smartalign
-%endif
-
 ; Takes an arbitrary number of cpuflags from the above list.
 ; All subsequent functions (up to the next INIT_CPUFLAGS) is built for the specified cpu.
 ; You shouldn't need to invoke this macro directly, it's a subroutine for INIT_MMX &co.
@@ -918,6 +912,7 @@ SECTION .note.GNU-stack noalloc noexec nowrite progbits
     %endif
 
     %ifdef __NASM_VER__
+        %use smartalign
         ALIGNMODE k7
     %elif ARCH_X86_64 || cpuflag(sse2)
         CPU amdnop

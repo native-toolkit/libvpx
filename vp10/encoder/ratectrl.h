@@ -26,7 +26,6 @@ extern "C" {
 
 #define MIN_GF_INTERVAL     4
 #define MAX_GF_INTERVAL     16
-#define FIXED_GF_INTERVAL   8    // Used in some testing modes only
 
 typedef enum {
   INTER_NORMAL = 0,
@@ -170,6 +169,7 @@ int vp10_rc_get_default_max_gf_interval(double framerate, int min_frame_rate);
 // First call per frame, one of:
 //   vp10_rc_get_one_pass_vbr_params()
 //   vp10_rc_get_one_pass_cbr_params()
+//   vp10_rc_get_svc_params()
 //   vp10_rc_get_first_pass_params()
 //   vp10_rc_get_second_pass_params()
 // depending on the usage to set the rate control encode parameters desired.
@@ -190,6 +190,7 @@ int vp10_rc_get_default_max_gf_interval(double framerate, int min_frame_rate);
 // encode_frame_to_data_rate() function.
 void vp10_rc_get_one_pass_vbr_params(struct VP10_COMP *cpi);
 void vp10_rc_get_one_pass_cbr_params(struct VP10_COMP *cpi);
+void vp10_rc_get_svc_params(struct VP10_COMP *cpi);
 
 // Post encode update of the rate control parameters based
 // on bytes used
